@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useState } from 'react'
 import { Dialog, DialogTitle, TextField, Button, CircularProgress, InputProps } from '@mui/material'
 import { ICredentials, IRegister } from 'src/utils/types'
-import { useAppDispatch, useAppSelector } from 'src/store/storeHooks'
-import { getAuthError, getAuthLoading } from 'src/store/user/selectors'
-import { TH_Register, TH_SignIn } from 'src/store/user/thunk'
-import userSlice from 'src/store/user/slice'
+import { useAppDispatch, useAppSelector } from 'src/store/StoreHooks'
+import { getAuthError, getAuthLoading } from 'src/store/User/selectors'
+import { TH_Register, TH_SignIn } from 'src/store/User/thunk'
+import userSlice from 'src/store/User/slice'
 
 const textFieldSx = { mx: 2, my: 0.5 }
 

@@ -1,5 +1,5 @@
 import { Action, ThunkAction, combineReducers, configureStore } from '@reduxjs/toolkit';
-import userSlice from './user/slice';
+import userSlice from './User/slice';
 
 const rootReducer = combineReducers({
 	user: userSlice.reducer,

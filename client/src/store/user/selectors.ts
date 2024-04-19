@@ -1,4 +1,4 @@
-import { RootState } from "../config"
+import { RootState } from "../Config"
 
 export const getAccount = (store: RootState) => store.user.account
 export const getAuthLoading = (store: RootState) => store.user.isLoading

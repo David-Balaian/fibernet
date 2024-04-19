@@ -8,11 +8,11 @@ import {
   ListSubheader,
   ListItemButton,
 } from '@mui/material'
-import OnlineIndicator from './OnlineIndicator'
-import AuthModal from './AuthModal'
-import { useAppDispatch, useAppSelector } from 'src/store/storeHooks'
-import { getAccount, getAuthStatus } from 'src/store/user/selectors'
-import userSlice from 'src/store/user/slice'
+import OnlineIndicator from '../OnlineIndicator/OnlineIndicator'
+import AuthModal from '../Auth/AuthModal'
+import { useAppDispatch, useAppSelector } from 'src/store/StoreHooks'
+import { getAccount, getAuthStatus } from 'src/store/User/selectors'
+import userSlice from 'src/store/User/slice'
 
 export default function Header() {
   const dispatch = useAppDispatch()

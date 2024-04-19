@@ -1,9 +1,9 @@
 import { useEffect } from 'react'
-import Header from './components/Header'
-import { useAppDispatch, useAppSelector } from './store/storeHooks'
-import { getAccount, getAuthStatus } from './store/user/selectors'
+import Header from './components/Templates/Header/Header'
+import { useAppDispatch, useAppSelector } from './store/StoreHooks'
+import { getAccount, getAuthStatus } from './store/User/selectors'
 import { getUserFromLS } from './utils/helperFunctions'
-import userSlice from './store/user/slice'
+import userSlice from './store/User/slice'
 
 export default function App() {
   const dispatch = useAppDispatch()
