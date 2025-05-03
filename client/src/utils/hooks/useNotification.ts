@@ -1,7 +1,7 @@
 
 import { useEffect } from "react"
 import { getNotifications } from "../../store/Notification/selectors"
-import { useAppSelector } from "src/store/StoreHooks"
+import { useAppSelector } from "src/store/storeHooks"
 import { useSnackbar } from "notistack"
 import { INotification } from "src/store/Notification/types"
 

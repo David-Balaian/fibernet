@@ -1,8 +1,10 @@
 import { Action, ThunkAction, combineReducers, configureStore } from '@reduxjs/toolkit';
-import userSlice from './User/slice';
+import userSlice from './user/slice';
+import notificationsSlice from './Notification/slice';
 
 const rootReducer = combineReducers({
 	user: userSlice.reducer,
+	notifications: notificationsSlice.reducer
 })
 
 // Define the AppThunk type for Thunk actions

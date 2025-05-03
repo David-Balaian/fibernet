@@ -6,6 +6,7 @@ export interface INotification {
 	icon?: boolean,
     message: string,
     autoHideDuration: number
+    ms?: number
 }
 
 export interface INotificationSlice {

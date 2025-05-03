@@ -1,5 +1,5 @@
 {
-  "homepage": "https://github.com/belferink1996/MERN-template#readme",
+  "homepage": "https://github.com/David-Balaian/MERN-template#readme",
   "name": "mern-application",
   "version": "0.1.0",
   "description": "",
@@ -7,14 +7,13 @@
   "main": "",
   "license": "ISC",
   "keywords": [],
-  "author": "Ben Elferink <ben.elferink@icloud.com> (https://www.linkedin.com/in/ben-elferink-37ba251b9)",
+  "author": "David Balayan <davidbalayan1@gmail.com> (http://linkedin.com/in/david-balaian/)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/belferink1996/MERN-template.git"
+    "url": "https://github.com/David-Balaian"
   },
   "bugs": {
-    "url": "https://github.com/belferink1996/MERN-template/issues",
-    "email": "ben.elferink@icloud.com"
+    "email": "davidbalayan1@gmail.com"
   },
   "scripts": {
     "install": "concurrently \"cd ./server && npm i\" \"cd ./client && npm i\"",

@@ -10,9 +10,9 @@ import {
 } from '@mui/material'
 import OnlineIndicator from '../OnlineIndicator/OnlineIndicator'
 import AuthModal from '../Auth/AuthModal'
-import { useAppDispatch, useAppSelector } from 'src/store/StoreHooks'
-import { getAccount, getAuthStatus } from 'src/store/User/selectors'
-import userSlice from 'src/store/User/slice'
+import { useAppDispatch, useAppSelector } from 'src/store/storeHooks'
+import { getAccount, getAuthStatus } from 'src/store/user/selectors'
+import userSlice from 'src/store/user/slice'
 
 export default function Header() {
   const dispatch = useAppDispatch()

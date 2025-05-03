@@ -28,13 +28,13 @@ class MongoDB implements IMongoDB {
     try {
       const db = await this.mongoose.connect(this.MONGO_URI, this.MONGO_OPTIONS);
       const connection = db.connection;
-
+      
       this.isConnected = connection.readyState === 1;
       if (this.isConnected) console.log('✅ MongoDB connected');
 
-      connection.on('connected', () => console.log('✅ MongoDB connected')); // re-connected
-      connection.on('disconnected', () => console.log('❌ MongoDB disconnected')); // disconnected
-      connection.on('error', (error) => console.log('❌ MongoDB connection error', error)); // listen for errors during the session
+      connection.on('connected', () => console.log('✅ MongoDB connected'));
+      connection.on('disconnected', () => console.log('❌ MongoDB disconnected'));
+      connection.on('error', (error) => console.log('❌ MongoDB connection error', error));
     } catch (error) {
       console.log('❌ MongoDB connection error:', (error as {message: string}).message);
     }
