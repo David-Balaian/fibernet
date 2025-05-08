@@ -7,7 +7,7 @@ export const MAIN_CABLE_OFFSET = 0.1;
 
 
 export const getOpticalCableScenes = (fibers: IFiber[], cableType: "in" | "out", cableIndex: number) => {
-    const posX = cableType === "in" ? -6 : 6;
+    const posX = cableType === "in" ? -2 : 2;
 
     const getFibersCircleLevel = (index: number) => {
         let sum = 8;
@@ -20,7 +20,7 @@ export const getOpticalCableScenes = (fibers: IFiber[], cableType: "in" | "out",
     };
 
     const createFiberMesh = (fiber: IFiber, index: number) => {
-        const fiberGeometry = new THREE.CylinderGeometry(FIBER_RADIUS, FIBER_RADIUS, 10.2, 32);
+        const fiberGeometry = new THREE.CylinderGeometry(FIBER_RADIUS, FIBER_RADIUS, 1.2, 32);
         const fiberMaterial = new THREE.MeshPhongMaterial({
             color: new THREE.Color(fiber.color),
             shininess: 0,
@@ -56,7 +56,7 @@ export const getOpticalCableScenes = (fibers: IFiber[], cableType: "in" | "out",
     // Create main cable
     const createMainCable = () => {
         const mainCableRadius = getFibersCircleLevel(fibers.length - 1) * FIBERS_RADIUS_OFFSET + MAIN_CABLE_OFFSET;
-        const cableGeometry = new THREE.CylinderGeometry(mainCableRadius, mainCableRadius, 10, 32);
+        const cableGeometry = new THREE.CylinderGeometry(mainCableRadius, mainCableRadius, 1, 32);
         const cableMaterial = new THREE.MeshPhongMaterial({
             color: 0x444444,
             shininess: 50,

@@ -23,10 +23,11 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
     const originalMaterials = useRef(new WeakMap()).current;
     const hoveredFiber = useRef<THREE.Object3D | null>(null);
     const selectedCable = useRef<THREE.Object3D | null>(null);
-    const [connections, setConnections] = useState<FiberConnection[]>([]);
+    const connections = useRef<FiberConnection[]>([]);
     const [selectedFibers, setSelectedFibers] = useState<THREE.Mesh[]>([]);
     const [activeConnection, setActiveConnection] = useState<FiberConnection | null>(null);
     const [selectedControlPoint, setSelectedControlPoint] = useState<number | null>(null);
+    const dragOffset = useRef<THREE.Vector3 | null>(null);
 
     // const [selectedCable, setSelectedCable] = useState<THREE.Object3D | null>(null);
 
@@ -91,56 +92,54 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
             })
         });
 
-        function getWorldPositionFromMouse(event: MouseEvent, camera: THREE.Camera, container: HTMLElement) {
-            const rect = container.getBoundingClientRect();
-            const mouse = new THREE.Vector2(
-                ((event.clientX - rect.left) / rect.width) * 2 - 1,
-                -((event.clientY - rect.top) / rect.height) * 2 + 1
-            );
+        // function getWorldPositionFromMouse(event: MouseEvent, camera: THREE.Camera, container: HTMLElement) {
+        //     const rect = container.getBoundingClientRect();
+        //     const mouse = new THREE.Vector2(
+        //         ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        //         -((event.clientY - rect.top) / rect.height) * 2 + 1
+        //     );
 
-            const raycaster = new THREE.Raycaster();
-            raycaster.setFromCamera(mouse, camera);
+        //     const raycaster = new THREE.Raycaster();
+        //     raycaster.setFromCamera(mouse, camera);
 
-            // Create plane at cable's initial Z position
-            const planeZ = selectedCable.current?.position.z || 0;
-            const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -planeZ);
-            const target = new THREE.Vector3();
-            raycaster.ray.intersectPlane(plane, target);
+        //     // Create plane at cable's initial Z position
+        //     const planeZ = selectedCable.current?.position.z || 0;
+        //     const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -planeZ);
+        //     const target = new THREE.Vector3();
+        //     raycaster.ray.intersectPlane(plane, target);
 
-            return target;
-        }
+        //     return target;
+        // }
 
 
 
         const handleMouseDown = (event: MouseEvent) => {
             if (!mountRef.current) return;
-            const rect = mountRef.current!.getBoundingClientRect();
+            const rect = mountRef.current.getBoundingClientRect();
             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects([...allCableGroups]);
-            // if (selectedCable.current) {
-            //     (selectedCable.current as THREE.Mesh).material = originalMaterials.get(selectedCable.current);
-            //     // selectedCable.current.position.x = selectedCable.current.userData.originalX;
-            //     selectedCable.current = null;
-            //     mountRef.current.style.cursor = 'default';
-            // }
-
-
 
             if (intersects.length > 0) {
                 controls.current!.enabled = false;
-                isDragging.current = (true)
-                // Find which group this object belongs to
+                isDragging.current = true;
                 const clickedObj = intersects[0].object;
-                const cableGroup = clickedObj.parent;  // This is our group
-
+                const cableGroup = clickedObj.parent; // This is our group
                 selectedCable.current = cableGroup;
+                if (cableGroup) {
+                    // Calculate initial intersection point
+                    const xyPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -cableGroup.position.z);
+                    const target = new THREE.Vector3();
+                    raycaster.ray.intersectPlane(xyPlane, target);
 
-                // selectedCable.position.x = originalX + (selectedCable.userData.cableType === 'in' ? 0.1 : -0.1);
-                mountRef.current.style.cursor = 'pointer';
+                    // Store offset between cable position and intersection point
+                    dragOffset.current = new THREE.Vector3().subVectors(cableGroup.position, target);
+
+                    mountRef.current.style.cursor = 'pointer';
+                }
             }
-        }
+        };
 
         const handleMouseUp = () => {
             if (!mountRef.current) return;
@@ -152,50 +151,44 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
 
         const handleMouseMove = (event: MouseEvent) => {
             if (!mountRef.current) return;
-            if (isDragging && selectedCable.current) {
-                if (!mountRef.current || !isDragging || !selectedCable.current) return;
-
+            if (isDragging.current && selectedCable.current && dragOffset.current) {
                 const rect = mountRef.current.getBoundingClientRect();
                 mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
                 mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-                // Create different planes for different movement modes
-                const xyPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-                const xzPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-
-                const raycaster = new THREE.Raycaster();
                 raycaster.setFromCamera(mouse, camera);
 
                 const target = new THREE.Vector3();
 
                 if (event.shiftKey) {
                     // XZ plane movement (Shift pressed)
+                    const xzPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -selectedCable.current.position.y);
                     raycaster.ray.intersectPlane(xzPlane, target);
-                    selectedCable.current.position.x = target.x;
-                    selectedCable.current.position.z = target.z;
-                    // Keep Y position unchanged
-                    target.y = selectedCable.current.position.y;
+                    selectedCable.current.position.x = target.x + dragOffset.current.x;
+                    selectedCable.current.position.z = target.z + dragOffset.current.z;
                 } else {
                     // XY plane movement (normal)
+                    const xyPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -selectedCable.current.position.z);
                     raycaster.ray.intersectPlane(xyPlane, target);
-                    selectedCable.current.position.x = target.x;
-                    selectedCable.current.position.y = target.y;
-                    // Keep Z position unchanged
-                    target.z = selectedCable.current.position.z;
+                    selectedCable.current.position.x = target.x + dragOffset.current.x;
+                    selectedCable.current.position.y = target.y + dragOffset.current.y;
                 }
 
-                console.log(`Moving to (${event.shiftKey ? 'XZ' : 'XY'}):`, target);
+                // Update connections
+                connections.current.forEach(connection => {
+                    const fiber1Group = connection['fiber1'].parent;
+                    const fiber2Group = connection['fiber2'].parent;
+                    if (fiber1Group === selectedCable.current || fiber2Group === selectedCable.current) {
+                        connection.update();
+                        scene.remove(connection.getMesh());
+                        scene.add(connection.getMesh());
+                    }
+                });
 
-                // Move all associated fibers
-                // const fibers = selectedCable.current === inCable ? inCableFibers : outCableFibers;
-                // fibers.forEach(fiber => {
-                //   fiber.position.copy(selectedCable.current.position);
-                // });
                 return;
             }
 
-
-            const rect = mountRef.current!.getBoundingClientRect();
+            const rect = mountRef.current.getBoundingClientRect();
             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
@@ -210,7 +203,6 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
             }
 
             if (intersects.length > 0 && intersects[0].object.userData.isFiber) {
-                // console.log(intersects);
                 hoveredFiber.current = intersects[0].object;
                 const originalX = hoveredFiber.current.position.x;
                 hoveredFiber.current.userData.originalX = originalX;
@@ -230,32 +222,32 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
             const intersects = raycaster.intersectObjects([...allCableGroups]);
 
             if (intersects.length > 0 && intersects[0].object.userData.isFiber) {
-                const clickedFiber = intersects[0].object  as THREE.Mesh;;
+                const clickedFiber = intersects[0].object as THREE.Mesh;;
                 setSelectedFiber({
                     index: clickedFiber.userData.fiberIndex,
                     cableType: clickedFiber.userData.cableType
                 });
+                console.log(clickedFiber.position, "clickedFiber.position");
 
                 // Visual feedback
                 const originalMaterial = originalMaterials.get(clickedFiber);
-                (clickedFiber as THREE.Mesh).material = new THREE.MeshPhongMaterial({
-                    color: new THREE.Color(0xff0000),
-                    shininess: 100
-                });
+                // (clickedFiber as THREE.Mesh).material = new THREE.MeshPhongMaterial({
+                //     color: new THREE.Color(0xff0000),
+                //     shininess: 100
+                // });
 
-                    if (selectedFibers.length === 0) {
-                        // First fiber selection
-                        setSelectedFibers([clickedFiber]);
-                    } else if (selectedFibers.length === 1 && selectedFibers[0] !== clickedFiber) {
-                        // Second fiber selection - create connection
-                        const connection = new FiberConnection(selectedFibers[0], clickedFiber);
-                        console.log(connection.getMesh(), "connection.getMesh()");
-                        
-                        scene.add(connection.getMesh());
-                        setConnections(prev=>[...prev, connection]);
-                        setActiveConnection(connection);
-                        setSelectedFibers([]);
-                    }
+                if (selectedFibers.length === 0) {
+                    // First fiber selection
+                    setSelectedFibers([clickedFiber]);
+                } else if (selectedFibers.length === 1 && selectedFibers[0] !== clickedFiber) {
+                    // Second fiber selection - create connection
+                    const connection = new FiberConnection(selectedFibers[0], clickedFiber);
+
+                    scene.add(connection.getMesh());
+                    connections.current = [...connections.current, connection]
+                    setActiveConnection(connection);
+                    setSelectedFibers([]);
+                }
 
 
                 // Reset after delay
@@ -282,7 +274,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
         };
     }, [allInteractiveObjects, selectedFibers]);
 
-    
+
 
     useEffect(() => {
         if (!mountRef.current) return;
@@ -325,8 +317,41 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
         allCableGroups.forEach(cable => scene.add(cable));
 
         // Add coordinate axes helper
+        // Create AxesHelper
         const axesHelper = new THREE.AxesHelper(5);
         scene.add(axesHelper);
+
+        // Function to create a TextSprite
+        const createTextSprite = (text: string, color: string): THREE.Sprite => {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d')!;
+            canvas.width = 128;
+            canvas.height = 128;
+            context.font = '48px Arial';
+            context.fillStyle = color;
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(text, 64, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.SpriteMaterial({ map: texture });
+            const sprite = new THREE.Sprite(material);
+            sprite.scale.set(0.5, 0.5, 0.5); // Adjust size of the label
+            return sprite;
+        };
+
+        // Add axis labels
+        const xLabel = createTextSprite('X', 'red');
+        xLabel.position.set(5.5, 0, 0); // Slightly beyond the X axis end
+        scene.add(xLabel);
+
+        const yLabel = createTextSprite('Y', 'green');
+        yLabel.position.set(0, 5.5, 0); // Slightly beyond the Y axis end
+        scene.add(yLabel);
+
+        const zLabel = createTextSprite('Z', 'blue');
+        zLabel.position.set(0, 0, 5.5); // Slightly beyond the Z axis end
+        scene.add(zLabel);
 
         // Animation loop
         const animate = () => {
@@ -400,8 +425,7 @@ const App: React.FC = () => {
     ]
     return (
         <div>
-            <h1 style={{ textAlign: 'center' }}>Optical Cable Visualization</h1>
-            <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+            <div style={{ margin: '0 auto' }}>
                 <OpticalCable cables={cables} />
             </div>
         </div>

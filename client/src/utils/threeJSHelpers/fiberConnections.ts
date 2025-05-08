@@ -1,91 +1,101 @@
 import * as THREE from 'three';
-
 export class FiberConnection {
-    private curve: THREE.CatmullRomCurve3;
-    private tubeGeometry: THREE.TubeGeometry;
-    private mesh: THREE.Mesh;
-    private points: THREE.Vector3[] = [];
-    private startFiber: THREE.Mesh;
-    private endFiber: THREE.Mesh;
-  
-    constructor(startFiber: THREE.Mesh, endFiber: THREE.Mesh) {
-      this.startFiber = startFiber;
-      this.endFiber = endFiber;
-  
-      // Initial straight line between fibers
-      this.points = [
-        startFiber.position.clone(),
-        new THREE.Vector3().lerpVectors(
-          startFiber.position,
-          endFiber.position,
-          0.5
-        ),
-        endFiber.position.clone()
-      ];
-  
-      this.createCurve();
-    }
-  
-    private createCurve() {
-      this.curve = new THREE.CatmullRomCurve3(this.points);
-      this.tubeGeometry = new THREE.TubeGeometry(this.curve, 64, 0.05, 16, false);
-      
-      // Create gradient material
-      const material = new THREE.MeshPhongMaterial({
-        vertexColors: true,
-        side: THREE.DoubleSide
-      });
-      
-      // Set vertex colors for gradient effect
-      const colors = [];
-      const halfVertices = this.tubeGeometry.attributes.position.count / 2;
-      for (let i = 0; i < this.tubeGeometry.attributes.position.count; i++) {
-        const color = i < halfVertices 
-          ? new THREE.Color(this.startFiber.material.color) 
-          : new THREE.Color(this.endFiber.material.color);
-        colors.push(color.r, color.g, color.b);
-      }
-      this.tubeGeometry.setAttribute(
-        'color', 
-        new THREE.Float32BufferAttribute(colors, 3)
-      );
-  
-      this.mesh = new THREE.Mesh(this.tubeGeometry, material);
-      return this.mesh;
-    }
-  
-    public addControlPoint(position: THREE.Vector3) {
-      // Add a new control point at the clicked position
-      this.points.splice(this.points.length - 1, 0, position);
-      this.updateCurve();
-    }
-  
-    public moveControlPoint(index: number, newPosition: THREE.Vector3) {
-      if (index > 0 && index < this.points.length - 1) {
-        this.points[index].copy(newPosition);
-        this.updateCurve();
-      }
-    }
-  
-    private updateCurve() {
-      this.curve.points = this.points;
-      this.curve.updateArcLengths();
-      
-      // Create new geometry with updated curve
-      const newGeometry = new THREE.TubeGeometry(this.curve, 64, 0.05, 16, false);
-      
-      // Copy vertex colors to new geometry
-      const colors = this.tubeGeometry.attributes.color.array;
-      newGeometry.setAttribute(
-        'color', 
-        new THREE.Float32BufferAttribute(colors, 3)
-      );
-      
-      this.mesh.geometry.dispose();
-      this.mesh.geometry = newGeometry;
-    }
-  
-    public getMesh() {
-      return this.mesh;
-    }
+  private fiber1: THREE.Mesh;
+  private fiber2: THREE.Mesh;
+  private mesh: THREE.Group;
+
+  constructor(fiber1: THREE.Mesh, fiber2: THREE.Mesh) {
+    this.fiber1 = fiber1;
+    this.fiber2 = fiber2;
+    this.mesh = this.createConnectionMesh();
   }
+
+  private createConnectionMesh(): THREE.Group {
+    const group = new THREE.Group();
+
+    const startPoint = new THREE.Vector3();
+    const endPoint = new THREE.Vector3();
+    this.fiber1.getWorldPosition(startPoint);
+    this.fiber2.getWorldPosition(endPoint);
+    // Get start and end points
+    startPoint.x += this.fiber1.userData.cableType === 'in' ? 0.5 : -0.5;
+    endPoint.x += this.fiber2.userData.cableType === 'in' ? 0.5 : -0.5;
+    // Adjust for fiber length (assuming fibers are along y-axis)
+    // startPoint.y += 0.5; // Start at top of first fiber
+    // endPoint.y -= 0.5;   // End at bottom of second fiber
+
+    // Create control points for smooth curve
+    const midPoint1 = new THREE.Vector3(
+      (startPoint.x + endPoint.x) / 2,
+      startPoint.y,
+      (startPoint.z + endPoint.z) / 2
+    );
+    const midPoint2 = new THREE.Vector3(
+      (startPoint.x + endPoint.x) / 2,
+      endPoint.y,
+      (startPoint.z + endPoint.z) / 2
+    );
+
+    const midStartPoint = startPoint.clone().add(
+      new THREE.Vector3(this.fiber1.userData.cableType === 'in' ? 0.5 : -0.5, 0, 0)
+    );
+    const midEndPoint = endPoint.clone().add(
+      new THREE.Vector3(this.fiber2.userData.cableType === 'in' ? 0.5 : -0.5, 0, 0)
+    );
+
+    this.fiber1.userData.cableType === 'in' ? 0.5 : -0.5;
+
+    // Create Catmull-Rom curve
+    const points = [
+      startPoint,
+      midStartPoint,
+      midPoint1,
+      midPoint2,
+      midEndPoint,
+      endPoint
+    ];
+    const curve = new THREE.CatmullRomCurve3(points);
+
+    // First half (fiber1 color)
+    const points1 = curve.getPoints(50).slice(0, 26);
+    const geometry1 = new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(points1),
+      20,
+      0.05,
+      8,
+      false
+    );
+    const material1 = new THREE.MeshPhongMaterial({
+      color: (this.fiber1.material as THREE.MeshPhongMaterial).color,
+      side: THREE.DoubleSide
+    });
+    const tube1 = new THREE.Mesh(geometry1, material1);
+    group.add(tube1);
+
+    // Second half (fiber2 color)
+    const points2 = curve.getPoints(50).slice(25);
+    const geometry2 = new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(points2),
+      20,
+      0.05,
+      8,
+      false
+    );
+    const material2 = new THREE.MeshPhongMaterial({
+      color: (this.fiber2.material as THREE.MeshPhongMaterial).color,
+      side: THREE.DoubleSide
+    });
+    const tube2 = new THREE.Mesh(geometry2, material2);
+    group.add(tube2);
+
+    return group;
+  }
+
+  public getMesh(): THREE.Group {
+    return this.mesh;
+  }
+  public update(): void {
+    this.mesh.clear();
+    this.mesh = this.createConnectionMesh();
+  }
+}

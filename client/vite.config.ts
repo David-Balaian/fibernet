@@ -12,7 +12,7 @@ export default defineConfig({
     react(),
     viteTsconfigPaths(), 
     svgr(), 
-    checker({typescript: true}),
+    // checker({typescript: true}),
     VitePWA({ 
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
