@@ -4,6 +4,7 @@ import { useAppDispatch, useAppSelector } from './store/storeHooks'
 import { getAccount, getAuthStatus } from './store/user/selectors'
 import { getUserFromLS } from './utils/helperFunctions'
 import userSlice from './store/user/slice'
+import OpticalCableVisualizer from './components/Templates/fibersConnection'
 
 export default function App() {
   const dispatch = useAppDispatch()
@@ -21,6 +22,7 @@ export default function App() {
       <Header />
 
       {isLoggedIn ? <LoggedInText /> : <LoggedOutText />}
+      <OpticalCableVisualizer />
     </div>
   )
 }
