@@ -1,5 +1,6 @@
 export type IFiber = {
     color: string,
+    isMarked?: boolean
 } 
 
 export type ICable = {

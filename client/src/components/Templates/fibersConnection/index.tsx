@@ -1,3 +1,4 @@
+import { colors } from '@mui/material';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import { FiberConnection } from 'src/utils/threeJSHelpers/fiberConnections';
 import { getOpticalCableScenes } from 'src/utils/threeJSHelpers/OpticalCableDrawer';
@@ -159,15 +160,21 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
                 raycaster.setFromCamera(mouse, camera);
 
                 const target = new THREE.Vector3();
+                const cameraDirection = new THREE.Vector3();
+                camera.getWorldDirection(cameraDirection);
 
-                if (event.shiftKey) {
-                    // XZ plane movement (Shift pressed)
+                // Automatic plane selection based on camera view
+                const verticalThreshold = 0.7; // Adjust this value to control plane switching sensitivity
+                const isTopDownView = Math.abs(cameraDirection.y) > verticalThreshold;
+
+                if (isTopDownView) {
+                    // XZ plane movement for top-down views
                     const xzPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -selectedCable.current.position.y);
                     raycaster.ray.intersectPlane(xzPlane, target);
                     selectedCable.current.position.x = target.x + dragOffset.current.x;
                     selectedCable.current.position.z = target.z + dragOffset.current.z;
                 } else {
-                    // XY plane movement (normal)
+                    // XY plane movement for angled/front views
                     const xyPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -selectedCable.current.position.z);
                     raycaster.ray.intersectPlane(xyPlane, target);
                     selectedCable.current.position.x = target.x + dragOffset.current.x;
@@ -184,8 +191,6 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
                         scene.add(connection.getMesh());
                     }
                 });
-
-                return;
             }
 
             const rect = mountRef.current.getBoundingClientRect();
@@ -245,7 +250,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
 
                     scene.add(connection.getMesh());
                     connections.current = [...connections.current, connection]
-                    setActiveConnection(connection);
+                    // setActiveConnection(connection);
                     setSelectedFibers([]);
                 }
 
@@ -256,6 +261,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
                 }, 300);
             } else {
                 setSelectedFiber(null);
+                setSelectedFibers([]);
             }
         };
 
@@ -291,7 +297,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
 
         // Camera setup
         camera.aspect = width / height;
-        camera.position.set(0.13, 2.02, 1.18);
+        camera.position.set(0.28, 4.36, 2.55);
         camera.lookAt(0, 0, 0);
         camera.updateProjectionMatrix();
 
@@ -416,12 +422,67 @@ const getRandomColor = () => {
     return { color: `rgb(${r}, ${g}, ${b})` };
 };
 
+
+
+
+
+
+
+
+
+
+
+
+
 const App: React.FC = () => {
     const cables: ICable[] = [
-        { type: "in", fibers: new Array(16).fill(null).map(getRandomColor) },
-        { type: "in", fibers: new Array(8).fill(null).map(getRandomColor) },
-        { type: "out", fibers: new Array(2).fill(null).map(getRandomColor) },
-        { type: "out", fibers: new Array(4).fill(null).map(getRandomColor) },
+        {
+            type: "in", fibers: [
+                { color: "rgb(0, 0, 255)" },
+                { color: "rgb(255, 165, 0)" },
+                { color: "rgb(0, 128, 0)" },
+                { color: "rgb(165, 42, 42)" },
+                { color: "rgb(128, 128, 128)" },
+                { color: "rgb(255, 255, 255)" },
+                { color: "rgb(255, 0, 0)" },
+                { color: "rgb(0, 0, 0)" },
+                { color: "rgb(255, 255, 0)" },
+                { color: "rgb(128, 0, 128)" },
+                { color: "rgb(255, 192, 203)" },
+                { color: "rgb(0, 255, 255)" },
+                { color: "rgb(0, 0, 255)", isMarked: true },
+                { color: "rgb(255, 165, 0)", isMarked: true },
+                { color: "rgb(0, 128, 0)", isMarked: true },
+                { color: "rgb(165, 42, 42)", isMarked: true },
+
+            ]
+        },
+        {
+            type: "in", fibers: [
+                { color: "rgb(0, 0, 255)" },
+                { color: "rgb(255, 165, 0)" },
+                { color: "rgb(0, 128, 0)" },
+                { color: "rgb(165, 42, 42)" },
+                { color: "rgb(128, 128, 128)" },
+                { color: "rgb(255, 255, 255)" },
+                { color: "rgb(255, 0, 0)" },
+                { color: "rgb(0, 0, 0)" },
+            ]
+        },
+        {
+            type: "out", fibers: [
+                { color: "rgb(0, 0, 255)" },
+                { color: "rgb(255, 0, 0)" },
+            ]
+        },
+        {
+            type: "out", fibers: [
+                { color: "rgb(0, 0, 255)" },
+                { color: "rgb(255, 165, 0)" },
+                { color: "rgb(0, 128, 0)" },
+                { color: "rgb(255, 0, 0)" },
+            ]
+        },
     ]
     return (
         <div>
