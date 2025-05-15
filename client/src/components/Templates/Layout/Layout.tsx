@@ -3,7 +3,6 @@ import { Outlet } from "react-router-dom"
 import styles from "./styles.module.css"
 import PopupsRoot from "../Popups/PopupsRoot"
 import { removeToken, removeUserFromLS } from "src/utils/helperFunctions"
-import { ThreeDots } from "react-loader-spinner"
 import useNotification from "../../../utils/hooks/useNotification"
 
 export const Layout = () => {
@@ -30,14 +29,15 @@ export const Layout = () => {
 
     return <div className={styles.layoutContainer}>
         <Suspense fallback={
-            <ThreeDots
-                visible={true}
-                height="80"
-                width="80"
-                color="#4fa94d"
-                radius="9"
-                ariaLabel="three-dots-loading"
-            />
+            // <ThreeDots
+            //     visible={true}
+            //     height="80"
+            //     width="80"
+            //     color="#4fa94d"
+            //     radius="9"
+            //     ariaLabel="three-dots-loading"
+            // />
+            <div>Loading ...</div>
         }>
             <PopupsRoot />
             <Outlet />
