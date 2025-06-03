@@ -8,7 +8,7 @@ export const MAIN_CABLE_OFFSET = 0.1;
 export const CABLE_HEIGHT = 10
 
 
-export const getOpticalCableScenes = (fibers: IFiber[], cableType: "in" | "out", cableIndex: number) => {
+export const getOpticalCableScenes = (fibers: IFiber[], cableType: "in" | "out", cableIndex: number, cableId: string) => {
     const posX = cableType === "in" ? -7 : 7;
 
     const getFibersCircleLevel = (index: number) => {
@@ -73,7 +73,9 @@ export const getOpticalCableScenes = (fibers: IFiber[], cableType: "in" | "out",
             fiberIndex: index,
             cableType: cableType,
             originalColor: fiber.color,
-            isMarked: fiber.isMarked
+            isMarked: fiber.isMarked,
+            cableId: fiber.cableId,
+            fiberId: fiber.id,
         };
     
         // Position the fiber
@@ -112,7 +114,8 @@ export const getOpticalCableScenes = (fibers: IFiber[], cableType: "in" | "out",
         // Add custom properties for identification
         cableMesh.userData = {
             isMainCable: true,
-            cableType: cableType
+            cableType: cableType,
+            id: cableId,
         };
 
         return cableMesh;
