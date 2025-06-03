@@ -19,9 +19,9 @@ export default function App() {
 
   return (
     <div className='App'>
-      <Header />
+      {/* <Header /> */}
 
-      {isLoggedIn ? <LoggedInText /> : <LoggedOutText />}
+      {/* {isLoggedIn ? <LoggedInText /> : <LoggedOutText />} */}
       <OpticalCableVisualizer />
     </div>
   )

@@ -1,18 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { save2DConnectionsToLocalStorage } from 'src/utils/helperFunctions';
+import { ICable, IFiber } from 'src/utils/threeJSHelpers/types';
 
 // --- TypeScript Interfaces ---
-interface IFiberFromProps {
-    color: string;
-    isMarked?: boolean;
-}
-
-interface ICableFromProps {
-    type: "in" | "out";
-    fibers: IFiberFromProps[];
-}
-
-interface Fiber {
-    id: string; // cableId-fiberIndex
+interface Fiber extends IFiber {
     originalColor: string;
     isMarked?: boolean;
     // Calculated properties for rendering & interaction
@@ -21,7 +12,7 @@ interface Fiber {
     cableId: string;
 }
 
-interface Cable {
+interface Cable extends ICable {
     id: string; // originalIndex-type
     originalType: "in" | "out";
     fibers: Fiber[];
@@ -36,7 +27,7 @@ interface Cable {
     isDragging?: boolean;
 }
 
-interface Connection {
+export interface Connection {
     id: string;
     fiber1Id: string;
     fiber2Id: string;
@@ -58,7 +49,7 @@ interface Presplice {
 }
 
 interface OpticalCanvasProps {
-    initialCables: ICableFromProps[];
+    initialCables: ICable[];
     width?: number;
     height?: number;
 }
@@ -67,11 +58,11 @@ interface OpticalCanvasProps {
 const CABLE_THICKNESS = 50; // Width for vertical cables, Height for horizontal
 const FIBER_DIMENSION_PARALLEL = 20;    // Width for fibers in vertical cable, Height for fibers in horizontal cable
 const FIBER_DIMENSION_PERPENDICULAR = 10; // Height for fibers in vertical cable, Width for fibers in horizontal cable
-const FIBER_SPACING = 4; // Gap between fibers
+const FIBER_SPACING = 6; // Gap between fibers
 const DRAG_HANDLE_RADIUS = 5;
 const DRAG_HANDLE_OFFSET = 8; // Offset from the corner for the dot
 const CANVAS_PADDING = 0;
-const PRESPLICE_PLUS_SIZE = 14;
+const PRESPLICE_PLUS_SIZE = 24;
 const CONNECTION_CONTROL_POINT_RADIUS = 4;
 const DELETE_ICON_SIZE = 16;
 const EDGE_TRANSFORM_THRESHOLD = 30; // How far to drag past edge to transform
@@ -80,7 +71,7 @@ const LINE_THICKNESS_FOR_COLLISION = 1;
 // Add these near your other constants
 const BEND_PENALTY = 30; // Arbitrary cost equivalent to 30px of length for each bend
 const PROXIMITY_PENALTY = 60; // Arbitrary cost if a path is too close to another
-const PROXIMITY_MARGIN = LINE_THICKNESS_FOR_COLLISION + 1; // How close is "too close". Must be > LINE_THICKNESS_FOR_COLLISION
+const PROXIMITY_MARGIN = LINE_THICKNESS_FOR_COLLISION + 4; // How close is "too close". Must be > LINE_THICKNESS_FOR_COLLISION
 const cableVerticalSpacing = 20;
 
 // const FIBER_AVOIDANCE_MARGIN = 0.001; // Margin around fibers that paths should avoid. Adjust as needed.
@@ -93,19 +84,20 @@ const CONNECTION_VISUAL_OFFSET = 10; // The "plus 1" offset
 // const CABLE_AVOIDANCE_MARGIN = 4;         // Margin around unrelated cable bodies.
 // const CABLE_INTERSECTION_PENALTY = 40000; // Penalty for paths crossing unrelated cable bodies.
 const FIBER_AVOIDANCE_MARGIN = 8;
-const FIBER_INTERSECTION_PENALTY = 5000000;
+const FIBER_INTERSECTION_PENALTY = 50000;
 const CABLE_AVOIDANCE_MARGIN = 4;
 const CABLE_INTERSECTION_PENALTY = 40000;
 const CENTRAL_CHANNEL_TOLERANCE = 5;
 const CENTRAL_CHANNEL_REWARD = (2 * BEND_PENALTY) + 10; // e.g., 70 if BEND_PENALTY is 30
 const MIDPOINT_ADD_HANDLE_RADIUS = 4; // Slightly smaller than main control points
 const MIDPOINT_ADD_HANDLE_COLOR = 'rgba(0, 180, 0, 0.8)'; // A distinct green
-
+const dx = 26
+const dy = 8
 
 const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
     initialCables,
-    width = 1000,
-    height = 700,
+    width = window.innerWidth,
+    height = window.innerHeight,
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [managedCables, setManagedCables] = useState<Cable[]>([]);
@@ -115,7 +107,52 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
     const [draggingCableInfo, setDraggingCableInfo] = useState<{ cableId: string; offsetX: number; offsetY: number } | null>(null);
     const [editingConnectionId, setEditingConnectionId] = useState<string | null>(null);
     const [draggingControlPoint, setDraggingControlPoint] = useState<{ connectionId: string; pointIndex: number; offsetX: number; offsetY: number } | null>(null);
-    console.log(connections);
+
+    useEffect(() => {
+        if (connections.length) {
+            save2DConnectionsToLocalStorage(connections)
+        }
+    }, [connections])
+
+
+    useEffect(() => {
+        const initialConnections = localStorage.getItem("connections2D")
+        if (initialConnections && managedCables.length) {
+            const parsedInitialConnections: Connection[] = JSON.parse(initialConnections)
+            const tempConnections: Connection[] = []
+            const parsedInitialConnectionsWithPaths: Connection[] = parsedInitialConnections.map(conn => {
+                if (conn.path.length === 0) {
+                    const fiber1 = getFiberById(conn.fiber1Id)
+                    const fiber2 = getFiberById(conn.fiber2Id)
+                    console.log({ conn, fiber1, fiber2 });
+
+                    if (fiber1 && fiber2) {
+                        const cable1 = getCableById(fiber1.cableId)
+                        const cable2 = getCableById(fiber2.cableId)
+                        if (cable1 && cable2) {
+                            const newPath = generateManhattanPathWithAvoidance(fiber1, fiber2, cable1, cable2, tempConnections, width, height);
+                            const newConnection = {
+                                ...conn,
+                                path: newPath,
+                                color1: fiber1.color,
+                                color2: fiber2.color,
+                                isMarked1: fiber1.isMarked,
+                                isMarked2: fiber2.isMarked,
+                            }
+                            tempConnections.push(newConnection)
+
+                            return newConnection
+                        }
+                    }
+                }
+                return conn
+            })
+
+            setConnections(parsedInitialConnectionsWithPaths)
+        }
+    }, [managedCables])
+
+
 
     const getFiberById = useCallback((fiberId: string): Fiber | undefined => {
         for (const cable of managedCables) {
@@ -125,8 +162,8 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         return undefined;
     }, [managedCables]);
 
-    const getCableByFiberId = useCallback((fiberId: string): Cable | undefined => {
-        return managedCables.find(c => c.id === `${fiberId.split('-')[0]}-${fiberId.split('-')[1]}`);
+    const getCableById = useCallback((cableId?: string): Cable | undefined => {
+        return managedCables.find(c => c.id === cableId);
     }, [managedCables]);
 
     // --- Initialization and Layout Calculation ---
@@ -211,7 +248,6 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         let currentOutCableBottomY = CANVAS_PADDING - cableVerticalSpacing;
 
         initialCables.forEach((c, index) => {
-            const cableId = `${index}-${c.type}`; // ID based on original index and type
             const orientation: 'vertical' | 'horizontal' = 'vertical';
             const numFibers = c.fibers.length;
 
@@ -235,16 +271,15 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             }
 
             processedCablesForLayout.push({
-                id: cableId,
+                id: c.id,
                 originalType: c.type,
                 fibers: c.fibers.map((f, fIndex) => ({
-                    id: `${cableId}-${fIndex}`,
+                    ...f,
                     originalColor: f.color,
-                    isMarked: f.isMarked,
                     rect: { x: 0, y: 0, width: 0, height: 0 }, // To be calculated by calculateLayout
                     exitPoint: { x: 0, y: 0 }, // To be calculated by calculateLayout
-                    cableId: cableId,
                 })),
+                type: c.type,
                 x: initialX,
                 y: initialY,
                 orientation: orientation,
@@ -314,23 +349,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             ctx.fill();
         });
 
-        // Draw Presplice (existing logic)
-        if (activePresplice) {
-            // ... (keep existing presplice drawing logic)
-            ctx.beginPath();
-            ctx.moveTo(activePresplice.lineStart.x, activePresplice.lineStart.y);
-            ctx.lineTo(activePresplice.lineEnd.x, activePresplice.lineEnd.y);
-            ctx.strokeStyle = 'grey';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([5, 5]);
-            ctx.stroke();
-            ctx.setLineDash([]);
 
-            const { x, y, size } = activePresplice.plusIconPosition;
-            ctx.fillStyle = 'green';
-            ctx.fillRect(x - size / 2, y - size / 6, size, size / 3);
-            ctx.fillRect(x - size / 6, y - size / 2, size / 3, size);
-        }
 
         // Draw Connections
         connections.forEach(conn => {
@@ -371,11 +390,13 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 }
                 if (firstHalfEndIndex > 0 || conn.path.length === 1) { ctx.stroke(); }
                 if (conn.isMarked1) { drawMarksOnPath(ctx, conn.path.slice(0, firstHalfEndIndex + 1), conn.color1); }
+                ctx.lineWidth = CONNECTION_LINE_WIDTH;
             }
             if (midPointIndex < conn.path.length - 1 || (conn.path.length === 1 && midPointIndex === 0)) {
                 ctx.strokeStyle = conn.color2;
                 ctx.beginPath();
                 const secondHalfStartIndex = conn.path.length === 1 ? 0 : midPointIndex;
+
                 if (conn.path[secondHalfStartIndex]) {
                     ctx.moveTo(conn.path[secondHalfStartIndex].x, conn.path[secondHalfStartIndex].y);
                     for (let i = secondHalfStartIndex + 1; i < conn.path.length; i++) {
@@ -383,11 +404,11 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                     }
                     if (conn.path.length > secondHalfStartIndex + 1 || (conn.path.length === 1 && secondHalfStartIndex === 0)) { ctx.stroke(); }
                     if (conn.isMarked2) {
-                        const pathForMarks = conn.path.slice(secondHalfStartIndex);
-                        if (pathForMarks.length > 1) { drawMarksOnPath(ctx, pathForMarks, conn.color2); }
+                        drawMarksOnPath(ctx, conn.path.slice(secondHalfStartIndex), conn.color2);
                     }
                 }
             }
+
 
 
             // Draw editing adorners if this connection is being edited
@@ -427,27 +448,58 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
 
                 // Draw delete icon (as before)
                 if (conn.deleteIconRect) {
+
                     ctx.fillStyle = 'red';
-                    ctx.fillRect(conn.deleteIconRect.x, conn.deleteIconRect.y, conn.deleteIconRect.width, conn.deleteIconRect.height);
+                    ctx.fillRect(conn.path[0].x - dx, conn.path[0].y - dy, conn.deleteIconRect.width, conn.deleteIconRect.height);
                     // ... (rest of delete icon drawing)
                     ctx.strokeStyle = 'white';
                     ctx.lineWidth = 1.5;
                     ctx.beginPath();
-                    ctx.moveTo(conn.deleteIconRect.x + 4, conn.deleteIconRect.y + 4);
-                    ctx.lineTo(conn.deleteIconRect.x + conn.deleteIconRect.width - 4, conn.deleteIconRect.y + conn.deleteIconRect.height - 4);
-                    ctx.moveTo(conn.deleteIconRect.x + conn.deleteIconRect.width - 4, conn.deleteIconRect.y + 4);
-                    ctx.lineTo(conn.deleteIconRect.x + 4, conn.deleteIconRect.y + conn.deleteIconRect.height - 4);
+                    ctx.moveTo(conn.path[0].x + 4 - dx, conn.path[0].y + 4 - dy);
+                    ctx.lineTo(conn.path[0].x + conn.deleteIconRect.width - 4 - dx, conn.path[0].y + conn.deleteIconRect.height - 4 - dy);
+                    ctx.moveTo(conn.path[0].x + conn.deleteIconRect.width - 4 - dx, conn.path[0].y + 4 - dy);
+                    ctx.lineTo(conn.path[0].x + 4 - dx, conn.path[0].y + conn.deleteIconRect.height - 4 - dy);
+                    ctx.stroke();
+
+
+                    ctx.fillStyle = 'red';
+                    ctx.fillRect(conn.path[conn.path.length - 1].x + dx - 16, conn.path[conn.path.length - 1].y - dy, conn.deleteIconRect.width, conn.deleteIconRect.height);
+                    // ... (rest of delete icon drawing)
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(conn.path[conn.path.length - 1].x + 4 + + dx - 16, conn.path[conn.path.length - 1].y + 4 - dy);
+                    ctx.lineTo(conn.path[conn.path.length - 1].x + conn.deleteIconRect.width - 4 + + dx - 16, conn.path[conn.path.length - 1].y + conn.deleteIconRect.height - 4 - dy);
+                    ctx.moveTo(conn.path[conn.path.length - 1].x + conn.deleteIconRect.width - 4 + + dx - 16, conn.path[conn.path.length - 1].y + 4 - dy);
+                    ctx.lineTo(conn.path[conn.path.length - 1].x + 4 + + dx - 16, conn.path[conn.path.length - 1].y + conn.deleteIconRect.height - 4 - dy);
                     ctx.stroke();
                 }
             }
         });
+
+        // Draw Presplice (existing logic)
+        if (activePresplice) {
+            ctx.beginPath();
+            ctx.moveTo(activePresplice.lineStart.x, activePresplice.lineStart.y);
+            ctx.lineTo(activePresplice.lineEnd.x, activePresplice.lineEnd.y);
+            ctx.strokeStyle = 'grey';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            const { x, y, size } = activePresplice.plusIconPosition;
+            ctx.fillStyle = 'green';
+            ctx.fillRect(x - size / 2, y - size / 6, size, size / 3);
+            ctx.fillRect(x - size / 6, y - size / 2, size / 3, size);
+        }
     }, [managedCables, connections, activePresplice, selectedFiberId1, editingConnectionId, width, height, getFiberById /* drawMarksOnPath should be stable or in useCallback if it depends on state/props */]);
 
     const drawMarksOnPath = (ctx: CanvasRenderingContext2D, path: { x: number, y: number }[], color: string) => {
         ctx.strokeStyle = 'black'; // Marks are black
-        ctx.lineWidth = 1;
-        const markLength = 4; // Length of the small mark lines
-        const markSpacing = 8; // Spacing along the path segment for marks
+        ctx.lineWidth = 3;
+        const markLength = CONNECTION_LINE_WIDTH; // Length of the small mark lines
+        const markSpacing = 10; // Spacing along the path segment for marks
 
         for (let i = 0; i < path.length - 1; i++) {
             const p1 = path[i];
@@ -811,7 +863,16 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
     // For now, assuming it's inside and has access to `managedCables` from the state.
 
 
+    function isPointInsideRectangle(pos: { x: number, y: number }, rect: { x: number, y: number, width: number, height: number }): boolean {
+        // Check if the point's x-coordinate is within the rectangle's x-bounds
+        const isWithinXBounds = pos.x >= rect.x && pos.x <= rect.x + rect.width;
 
+        // Check if the point's y-coordinate is within the rectangle's y-bounds
+        const isWithinYBounds = pos.y >= rect.y && pos.y <= rect.y + rect.height;
+
+        // The point is inside the rectangle if it's within both x and y bounds
+        return isWithinXBounds && isWithinYBounds;
+    }
 
     // --- Event Handlers ---
     const getMousePos = useCallback((e: React.MouseEvent): { x: number, y: number } => {
@@ -829,73 +890,76 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             const conn = connections.find(c => c.id === editingConnectionId);
             if (conn) {
                 // Check delete icon click
-                if (conn.deleteIconRect && pos.x >= conn.deleteIconRect.x && pos.x <= conn.deleteIconRect.x + conn.deleteIconRect.width &&
-                    pos.y >= conn.deleteIconRect.y && pos.y <= conn.deleteIconRect.y + conn.deleteIconRect.height) {
-                    setConnections(prev => prev.filter(c => c.id !== editingConnectionId));
-                    setEditingConnectionId(null);
-                    return;
-                }
-                // Check control point drag
-                for (let i = 0; i < (conn.controlPoints?.length || 0); i++) {
-                    const cp = conn.controlPoints![i];
-                    const dist = Math.sqrt((pos.x - cp.x) ** 2 + (pos.y - cp.y) ** 2);
-                    if (dist <= CONNECTION_CONTROL_POINT_RADIUS + 2) { // +2 for easier clicking
-                        setDraggingControlPoint({
-                            connectionId: conn.id,
-                            pointIndex: i,
-                            offsetX: cp.x - pos.x,
-                            offsetY: cp.y - pos.y,
-                        });
+                if(conn.deleteIconRect){
+                    const rect1 = { x: conn.path[conn.path.length - 1].x + dx - 16, y: conn.path[conn.path.length - 1].y - dy, width: conn.deleteIconRect.width, height: conn.deleteIconRect.height }
+                    const rect2 = { x: conn.path[0].x - dx, y: conn.path[0].y - dy, width: conn.deleteIconRect.width, height: conn.deleteIconRect.height }
+                    if (isPointInsideRectangle(pos, rect1) || isPointInsideRectangle(pos, rect2)) {
+                        setConnections(prev => prev.filter(c => c.id !== editingConnectionId));
+                        setEditingConnectionId(null);
                         return;
                     }
-                }
-                if (conn.path.length >= 2) {
-                    for (let i = 0; i < conn.path.length - 1; i++) {
-                        const p1 = conn.path[i];
-                        const p2 = conn.path[i + 1];
-
-                        if (Math.abs(p1.x - p2.x) + Math.abs(p1.y - p2.y) <= MIDPOINT_ADD_HANDLE_RADIUS * 4) {
-                            continue; // Skip for very short segments
-                        }
-
-                        const midX = (p1.x + p2.x) / 2;
-                        const midY = (p1.y + p2.y) / 2;
-                        const distToMidpoint = Math.sqrt((pos.x - midX) ** 2 + (pos.y - midY) ** 2);
-
-                        if (distToMidpoint <= MIDPOINT_ADD_HANDLE_RADIUS + 2) { // +2 for easier clicking
-                            const newPointFromClick = { x: pos.x, y: pos.y }; // New point is initially at mouse position
-
-                            const newPath = [
-                                ...conn.path.slice(0, i + 1),      // Includes p1 (original conn.path[i])
-                                newPointFromClick,                 // The new vertex, becomes path[i+1]
-                                ...conn.path.slice(i + 1)          // Includes p2 (original conn.path[i+1]), now at path[i+2]
-                            ];
-
-                            const newPointIndex = i + 1;
-
-                            setConnections(prevConns => prevConns.map(c => {
-                                if (c.id === conn.id) {
-                                    return {
-                                        ...c,
-                                        path: newPath, // Path with the newly inserted point
-                                        // Control points are regenerated based on the new path in the mouseMove
-                                        controlPoints: newPath.map(p_ => ({ ...p_, radius: CONNECTION_CONTROL_POINT_RADIUS }))
-                                    };
-                                }
-                                return c;
-                            }));
-
-                            // Immediately start dragging this newly added point.
-                            // offsetX and offsetY are 0 because newPointFromClick IS pos.
+                    // Check control point drag
+                    for (let i = 0; i < (conn.controlPoints?.length || 0); i++) {
+                        const cp = conn.controlPoints![i];
+                        const dist = Math.sqrt((pos.x - cp.x) ** 2 + (pos.y - cp.y) ** 2);
+                        if (dist <= CONNECTION_CONTROL_POINT_RADIUS + 2) { // +2 for easier clicking
                             setDraggingControlPoint({
                                 connectionId: conn.id,
-                                pointIndex: newPointIndex,
-                                offsetX: newPointFromClick.x - pos.x, // This will be 0
-                                offsetY: newPointFromClick.y - pos.y, // This will be 0
+                                pointIndex: i,
+                                offsetX: cp.x - pos.x,
+                                offsetY: cp.y - pos.y,
                             });
-                            setActivePresplice(null);
-                            setSelectedFiberId1(null);
                             return;
+                        }
+                    }
+                    if (conn.path.length >= 2) {
+                        for (let i = 0; i < conn.path.length - 1; i++) {
+                            const p1 = conn.path[i];
+                            const p2 = conn.path[i + 1];
+    
+                            if (Math.abs(p1.x - p2.x) + Math.abs(p1.y - p2.y) <= MIDPOINT_ADD_HANDLE_RADIUS * 4) {
+                                continue; // Skip for very short segments
+                            }
+    
+                            const midX = (p1.x + p2.x) / 2;
+                            const midY = (p1.y + p2.y) / 2;
+                            const distToMidpoint = Math.sqrt((pos.x - midX) ** 2 + (pos.y - midY) ** 2);
+    
+                            if (distToMidpoint <= MIDPOINT_ADD_HANDLE_RADIUS + 2) { // +2 for easier clicking
+                                const newPointFromClick = { x: pos.x, y: pos.y }; // New point is initially at mouse position
+    
+                                const newPath = [
+                                    ...conn.path.slice(0, i + 1),      // Includes p1 (original conn.path[i])
+                                    newPointFromClick,                 // The new vertex, becomes path[i+1]
+                                    ...conn.path.slice(i + 1)          // Includes p2 (original conn.path[i+1]), now at path[i+2]
+                                ];
+    
+                                const newPointIndex = i + 1;
+    
+                                setConnections(prevConns => prevConns.map(c => {
+                                    if (c.id === conn.id) {
+                                        return {
+                                            ...c,
+                                            path: newPath, // Path with the newly inserted point
+                                            // Control points are regenerated based on the new path in the mouseMove
+                                            controlPoints: newPath.map(p_ => ({ ...p_, radius: CONNECTION_CONTROL_POINT_RADIUS }))
+                                        };
+                                    }
+                                    return c;
+                                }));
+    
+                                // Immediately start dragging this newly added point.
+                                // offsetX and offsetY are 0 because newPointFromClick IS pos.
+                                setDraggingControlPoint({
+                                    connectionId: conn.id,
+                                    pointIndex: newPointIndex,
+                                    offsetX: newPointFromClick.x - pos.x, // This will be 0
+                                    offsetY: newPointFromClick.y - pos.y, // This will be 0
+                                });
+                                setActivePresplice(null);
+                                setSelectedFiberId1(null);
+                                return;
+                            }
                         }
                     }
                 }
@@ -926,27 +990,29 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
 
                 const fiber1 = getFiberById(activePresplice.fiber1Id);
                 const fiber2 = getFiberById(activePresplice.fiber2Id);
-                const cable1 = getCableByFiberId(activePresplice.fiber1Id);
-                const cable2 = getCableByFiberId(activePresplice.fiber2Id);
-                console.log(fiber1, fiber2, cable1, cable2, managedCables);
+                if (fiber1 && fiber2) {
+                    const cable1 = getCableById(fiber1.cableId)
+                    const cable2 = getCableById(fiber2.cableId)
+                    console.log(fiber1, fiber2, cable1, cable2);
 
-                if (fiber1 && fiber2 && cable1 && cable2) {
-                    const newPath = generateManhattanPathWithAvoidance(fiber1, fiber2, cable1, cable2, connections, width, height);
-                    const newConnection: Connection = {
-                        id: `conn-${Date.now()}`,
-                        fiber1Id: fiber1.id,
-                        fiber2Id: fiber2.id,
-                        path: newPath,
-                        color1: fiber1.originalColor,
-                        color2: fiber2.originalColor,
-                        isMarked1: fiber1.isMarked,
-                        isMarked2: fiber2.isMarked,
-                    };
-                    setConnections(prev => [...prev, newConnection]);
-                    setActivePresplice(null);
-                    setSelectedFiberId1(null);
-                    setEditingConnectionId(null); // Clear any other editing state
-                    return;
+                    if (cable1 && cable2) {
+                        const newPath = generateManhattanPathWithAvoidance(fiber1, fiber2, cable1, cable2, connections, width, height);
+                        const newConnection: Connection = {
+                            id: `conn-${Date.now()}`,
+                            fiber1Id: fiber1.id,
+                            fiber2Id: fiber2.id,
+                            path: newPath,
+                            color1: fiber1.originalColor,
+                            color2: fiber2.originalColor,
+                            isMarked1: fiber1.isMarked,
+                            isMarked2: fiber2.isMarked,
+                        };
+                        setConnections(prev => [...prev, newConnection]);
+                        setActivePresplice(null);
+                        setSelectedFiberId1(null);
+                        setEditingConnectionId(null); // Clear any other editing state
+                        return;
+                    }
                 }
             }
         }
@@ -1030,7 +1096,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         setActivePresplice(null);
         setEditingConnectionId(null);
 
-    }, [managedCables, activePresplice, selectedFiberId1, connections, editingConnectionId, getFiberById, getCableByFiberId, generateManhattanPathWithAvoidance]);
+    }, [managedCables, activePresplice, selectedFiberId1, connections, editingConnectionId, getFiberById, getCableById, generateManhattanPathWithAvoidance]);
 
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
         const pos = getMousePos(e);
@@ -1084,8 +1150,8 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 return prevConns.map(conn => {
                     const fiber1 = getFiberById(conn.fiber1Id);
                     const fiber2 = getFiberById(conn.fiber2Id);
-                    const cable1 = getCableByFiberId(conn.fiber1Id);
-                    const cable2 = getCableByFiberId(conn.fiber2Id);
+                    const cable1 = getCableById(fiber1?.cableId);
+                    const cable2 = getCableById(fiber2?.cableId);
                     if (fiber1 && fiber2 && cable1 && cable2) {
                         // Regenerate path - this will be Manhattan, user's diagonal edits will be lost
                         const newPath = generateManhattanPathWithAvoidance(fiber1, fiber2, cable1, cable2, prevConns.filter(cn => cn.id !== conn.id), width, height, conn.id);
@@ -1107,7 +1173,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             // --- CONTROL POINT DRAGGING LOGIC ---
             setConnections(prevConns => prevConns.map(conn => {
                 if (conn.id === draggingControlPoint.connectionId) {
-                    const currentPath = [...conn.path]; 
+                    const currentPath = [...conn.path];
                     const pointIndex = draggingControlPoint.pointIndex;
 
                     if (pointIndex < 0 || pointIndex >= currentPath.length) return conn; // Safety
@@ -1118,7 +1184,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                     // Optional: Clamp to canvas bounds
                     newPointX = Math.max(0, Math.min(width, newPointX));
                     newPointY = Math.max(0, Math.min(height, newPointY));
-                    
+
                     const draggedPoint = { x: newPointX, y: newPointY };
                     currentPath[pointIndex] = draggedPoint; // Directly update the dragged point's position
 
@@ -1134,7 +1200,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
 
                     if (pointIndex !== 0 && fiber1) { // If NOT dragging the start point, re-anchor it
                         let f1Exit = { ...fiber1.exitPoint };
-                        const startCable = getCableByFiberId(conn.fiber1Id);
+                        const startCable = getCableById(getFiberById(conn.fiber1Id)?.cableId);
                         if (startCable) {
                             if (startCable.orientation === 'vertical') {
                                 f1Exit.x += (startCable.originalType === 'in' ? CONNECTION_VISUAL_OFFSET : -CONNECTION_VISUAL_OFFSET);
@@ -1146,7 +1212,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                     }
                     if (pointIndex !== currentPath.length - 1 && fiber2) { // If NOT dragging the end point, re-anchor it
                         let f2Exit = { ...fiber2.exitPoint };
-                        const endCable = getCableByFiberId(conn.fiber2Id);
+                        const endCable = getCableById(getFiberById(conn.fiber2Id)?.cableId);
                         if (endCable) {
                             if (endCable.orientation === 'vertical') {
                                 f2Exit.x += (endCable.originalType === 'in' ? CONNECTION_VISUAL_OFFSET : -CONNECTION_VISUAL_OFFSET);
@@ -1156,16 +1222,16 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         }
                         currentPath[currentPath.length - 1] = f2Exit;
                     }
-                    
+
                     // Basic path simplification: remove consecutive duplicate points
                     const simplifiedPath = currentPath.reduce((acc, p, idx) => {
                         if (idx === 0 || Math.abs(p.x - acc[acc.length - 1].x) > 0.01 || Math.abs(p.y - acc[acc.length - 1].y) > 0.01) {
                             acc.push(p);
-                        } else if (idx === currentPath.length -1 ) { // Ensure last point is kept if different from previous even if new prev is same
-                             acc.push(p);
+                        } else if (idx === currentPath.length - 1) { // Ensure last point is kept if different from previous even if new prev is same
+                            acc.push(p);
                         }
                         return acc;
-                    }, [] as {x: number, y: number}[]);
+                    }, [] as { x: number, y: number }[]);
 
                     // Ensure the path has at least one point, or two if it's not a self-loop
                     let finalPathForConnection = simplifiedPath;
@@ -1173,32 +1239,32 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         finalPathForConnection = [currentPath[0]]; // At least one point
                     }
                     if (finalPathForConnection.length === 1 && fiber1 && fiber2 && fiber1.id !== fiber2.id && currentPath.length > 1) {
-                         // If it collapsed to one point but wasn't a self-loop, restore original endpoints for safety
-                         // This scenario means the dragged point made the path invalid, likely by coinciding with both neighbors.
-                         // A better recovery might be just the two (offsetted) fiber exit points.
+                        // If it collapsed to one point but wasn't a self-loop, restore original endpoints for safety
+                        // This scenario means the dragged point made the path invalid, likely by coinciding with both neighbors.
+                        // A better recovery might be just the two (offsetted) fiber exit points.
                         const safePath = [currentPath[0]];
-                        if(currentPath.length > 1) safePath.push(currentPath[currentPath.length-1]);
+                        if (currentPath.length > 1) safePath.push(currentPath[currentPath.length - 1]);
 
                         const uniqueSafePath = safePath.reduce((acc, p, idx) => {
-                             if (idx === 0 || Math.abs(p.x - acc[acc.length - 1].x) > 0.01 || Math.abs(p.y - acc[acc.length - 1].y) > 0.01) {
+                            if (idx === 0 || Math.abs(p.x - acc[acc.length - 1].x) > 0.01 || Math.abs(p.y - acc[acc.length - 1].y) > 0.01) {
                                 acc.push(p);
                             }
                             return acc;
-                        }, [] as {x: number, y: number}[]);
+                        }, [] as { x: number, y: number }[]);
                         finalPathForConnection = uniqueSafePath.length > 0 ? uniqueSafePath : [draggedPoint];
                     }
 
 
-                    return { 
-                        ...conn, 
-                        path: finalPathForConnection, 
-                        controlPoints: finalPathForConnection.map(p_ => ({ ...p_, radius: CONNECTION_CONTROL_POINT_RADIUS })) 
+                    return {
+                        ...conn,
+                        path: finalPathForConnection,
+                        controlPoints: finalPathForConnection.map(p_ => ({ ...p_, radius: CONNECTION_CONTROL_POINT_RADIUS }))
                     };
                 }
                 return conn;
             }));
         }
-    }, [draggingCableInfo, draggingControlPoint, width, height, calculateLayout, getFiberById, getCableByFiberId, connections, getMousePos, editingConnectionId /* Added editingConnectionId */]);
+    }, [draggingCableInfo, draggingControlPoint, width, height, calculateLayout, getFiberById, getCableById, connections, getMousePos, editingConnectionId /* Added editingConnectionId */]);
     const handleMouseUp = useCallback(() => {
         if (draggingCableInfo) {
             setManagedCables(prev => prev.map(c => c.id === draggingCableInfo.cableId ? { ...c, dragHandle: { ...c.dragHandle, isActive: false } } : c));
@@ -1226,7 +1292,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         //     }
         // }
 
-    }, [managedCables, getFiberById, getCableByFiberId, generateManhattanPathWithAvoidance, editingConnectionId, activePresplice]);
+    }, [managedCables, getFiberById, getCableById, generateManhattanPathWithAvoidance, editingConnectionId, activePresplice]);
 
 
     return (

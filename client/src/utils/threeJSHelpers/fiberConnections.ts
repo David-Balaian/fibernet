@@ -18,14 +18,15 @@ export class FiberConnection {
   public fiber1: THREE.Mesh;
   public fiber2: THREE.Mesh;
   private mesh: THREE.Group;
+  private controlPointsForConstructor?: ControlPointData[]
 
   // Store the 4 intermediate control points as class members
   private controlPoints: THREE.Vector3[];
 
-  constructor(fiber1: THREE.Mesh, fiber2: THREE.Mesh) {
+  constructor(fiber1: THREE.Mesh, fiber2: THREE.Mesh, controlPointsForConstructor?: ControlPointData[]) {
     this.fiber1 = fiber1;
     this.fiber2 = fiber2;
-
+    this.controlPointsForConstructor = controlPointsForConstructor
     // Initialize control points based on initial fiber positions
     this.controlPoints = this.calculateInitialControlPoints();
 
@@ -35,6 +36,9 @@ export class FiberConnection {
   }
 
   private calculateInitialControlPoints(): THREE.Vector3[] {
+    if(this.controlPointsForConstructor){
+      return this.controlPointsForConstructor.map(item=>new THREE.Vector3(item.x, item.y, item.z))
+    }
     const fiber1WorldPos = new THREE.Vector3();
     const fiber2WorldPos = new THREE.Vector3();
     this.fiber1.getWorldPosition(fiber1WorldPos);

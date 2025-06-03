@@ -1,6 +1,6 @@
 import { colors } from '@mui/material';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
-import { saveConnectionsToLocalStorage } from 'src/utils/helperFunctions';
+import { save3DConnectionsToLocalStorage } from 'src/utils/helperFunctions';
 import { ControlPointData, FiberConnection, InitialConnectionObject } from 'src/utils/threeJSHelpers/fiberConnections';
 import { getOpticalCableScenes } from 'src/utils/threeJSHelpers/OpticalCableDrawer';
 import { ICable, IFiber } from 'src/utils/threeJSHelpers/types';
@@ -13,6 +13,8 @@ interface OpticalCableProps {
 
 const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
     const mountRef = useRef<HTMLDivElement>(null);
+    const isMounted = useRef<boolean>(false);
+    
     const scene = useRef(new THREE.Scene()).current;
     const camera = useRef(new THREE.PerspectiveCamera(75, 1, 0.1, 1000)).current;
     const renderer = useRef<THREE.WebGLRenderer | null>(null);
@@ -106,7 +108,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
                 const connection = new FiberConnection(
                     fiber1Mesh,
                     fiber2Mesh,
-                    // controlPointsForConstructor
+                    controlPointsForConstructor
                 );
                 sceneInstance.add(connection.getMesh());
                 newConnections.push(connection);
@@ -138,7 +140,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
 
     useEffect(() => {
         if(connections.current.length)
-        saveConnectionsToLocalStorage(connections.current)
+        save3DConnectionsToLocalStorage(connections.current)
     }, [connections.current, random]);
 
 
@@ -259,7 +261,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
 
     
     useEffect(()=>{
-        const initialConnections = localStorage.getItem("connections");
+        const initialConnections = localStorage.getItem("connections3D");
         console.log(initialConnections);
         
         if(initialConnections && allFibers.length && scene) {
@@ -739,7 +741,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
 
     useEffect(() => {
         if (!mountRef.current) return;
-
+        isMounted.current = true
         // Initialize renderer
         renderer.current = new THREE.WebGLRenderer({ antialias: true });
         const rendererInstance = renderer.current;
@@ -873,7 +875,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
                     style={{
                         position: 'absolute',
                         bottom: '20px', // Adjust as needed for spacing from other UI
-                        left: 'calc(20px + 200px + 20px)', // Example: to the right of the info box, adjust width (200px) as needed
+                        left: '300px', // Example: to the right of the info box, adjust width (200px) as needed
                         // If you want it truly bottom-left most, use left: '20px' and adjust bottom relative to other elements
                         // For now, placing it to the right of the existing info box:
                         // left: '20px', // if you want it stacked or need to adjust other UI
