@@ -83,11 +83,18 @@ const App = () => {
         },
         {
             id: cable5ID,
-            type: "out", fibers: [
-                { color: "rgb(0, 0, 255)", id: "43", cableId: cable5ID },
-                { color: "rgb(255, 165, 0)", id: "44", cableId: cable5ID },
-                { color: "rgb(0, 128, 0)", id: "45", cableId: cable5ID },
-                { color: "rgb(255, 0, 0)", id: "46", cableId: cable5ID },
+            type: "out", 
+            tubes: [
+                { color: "rgb(0, 0, 255)", id: "53", cableId: cable5ID },
+                { color: "rgb(255, 165, 0)", id: "54", cableId: cable5ID },
+                { color: "rgb(0, 128, 0)", id: "55", cableId: cable5ID },
+                { color: "rgb(255, 0, 0)", id: "56", cableId: cable5ID },
+            ],
+            fibers: [
+                { color: "rgb(0, 0, 255)", id: "43", cableId: cable5ID, tubeId: "53" },
+                { color: "rgb(255, 165, 0)", id: "44", cableId: cable5ID, tubeId: "54" },
+                { color: "rgb(0, 128, 0)", id: "45", cableId: cable5ID, tubeId: "54" },
+                { color: "rgb(255, 0, 0)", id: "46", cableId: cable5ID, tubeId: "53" },
             ]
         },
     ]
