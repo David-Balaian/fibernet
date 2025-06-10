@@ -18,3 +18,10 @@ export interface IUser {
     lastName: string,
     role: string
 }
+
+export type Splitter = {
+        name: string;
+        id: string;
+        inputs: { id: string; parentId: string; color?: string }[];
+        outputs: { id: string; parentId: string; color?: string }[];
+    }

@@ -1,20 +1,22 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { save2DConnectionsToLocalStorage } from 'src/utils/helperFunctions'; // Assuming this exists
 import { ICable as InitialICable, IFiber as InitialIFiber } from 'src/utils/threeJSHelpers/types'; // Assuming these exist
+import { Splitter } from 'src/utils/types';
+import { v4 } from 'uuid';
 
 // Re-define local input types if they differ or for clarity
 export type IFiber = {
     color: string;
     isMarked?: boolean;
     id: string;
-    cableId: string;
+    parentId: string;
     tubeId?: string;
 };
 
 export type ITube = {
     color: string;
     id: string;
-    cableId: string;
+    parentId: string;
 };
 
 export type ICable = {
@@ -76,17 +78,43 @@ interface Presplice {
 
 interface OpticalCanvasProps {
     initialCables: ICable[]; // Using the locally defined ICable for props
+    objectsOnCanvas?: Splitter[];
     width?: number;
     height?: number;
+}
+
+interface SplitterPort {
+    id: string;
+    parentId: string; // The ID of the splitter
+    originalColor: string;
+    color: string;
+    isMarked?: boolean;
+    rect: { x: number; y: number; width: number; height: number };
+    exitPoint: { x: number; y: number };
+    type: "in" | "out";
+}
+
+interface SplitterState extends Splitter {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation: number; // In radians
+    inputs: SplitterPort[]; // Now contains calculated positions
+    outputs: SplitterPort[]; // Now contains calculated positions
+    dragHandle: { x: number; y: number; radius: number; isActive?: boolean };
+    rotateHandle: { x: number; y: number; width: number; height: number; isActive?: boolean };
+    isDragging?: boolean;
+    isRotating?: boolean;
 }
 
 // --- Constants ---
 const CABLE_THICKNESS = 50;
 const FIBER_DIMENSION_PARALLEL = 20;    // Width for fibers in vertical cable, Height for fibers in horizontal cable
-const FIBER_DIMENSION_PERPENDICULAR = 10; // Height for fibers in vertical cable, Width for fibers in horizontal cable
+const FIBER_DIMENSION_PERPENDICULAR = 8; // Height for fibers in vertical cable, Width for fibers in horizontal cable
+const FIBER_SPACING = 2; // Gap between fibers within a tube, or directly in cable if no tubes
 const TUBE_PADDING = 10; // Padding inside the cable body around the tubes area
 const TUBE_SPACING = 5; // Vertical gap between tubes inside a cable
-const FIBER_SPACING = 2; // Gap between fibers within a tube, or directly in cable if no tubes
 const DRAG_HANDLE_RADIUS = 5;
 const DRAG_HANDLE_OFFSET = 8;
 const CANVAS_PADDING = 20; // Increased for better edge visibility
@@ -94,26 +122,106 @@ const PRESPLICE_PLUS_SIZE = 24;
 const CONNECTION_CONTROL_POINT_RADIUS = 4;
 const DELETE_ICON_SIZE = 16;
 const EDGE_TRANSFORM_THRESHOLD = 30;
-const CONNECTION_LINE_WIDTH = 6;
+const CONNECTION_LINE_WIDTH = 3;
 const LINE_THICKNESS_FOR_COLLISION = 1;
 const BEND_PENALTY = 30;
 const PROXIMITY_PENALTY = 60;
+const CROSSING_PENALTY = 250;
 const PROXIMITY_MARGIN = LINE_THICKNESS_FOR_COLLISION + 4;
 const cableVerticalSpacing = 20; // Initial vertical spacing between cables
 const FIBER_AVOIDANCE_MARGIN = 8;
-const FIBER_INTERSECTION_PENALTY = 50000;
+const FIBER_INTERSECTION_PENALTY = 500000;
 const CABLE_AVOIDANCE_MARGIN = 4;
-const CABLE_INTERSECTION_PENALTY = 40000;
-const CENTRAL_CHANNEL_TOLERANCE = 5;
+const CABLE_INTERSECTION_PENALTY = 400000;
+const SPLITTER_INTERSECTION_PENALTY = 450000000;
+const CENTRAL_CHANNEL_TOLERANCE = 20;
 const CENTRAL_CHANNEL_REWARD = (2 * BEND_PENALTY) + 10;
 const MIDPOINT_ADD_HANDLE_RADIUS = 4;
 const MIDPOINT_ADD_HANDLE_COLOR = 'rgba(0, 180, 0, 0.8)';
-const CONNECTION_VISUAL_OFFSET = 10; // Offset for connection lines to avoid fiber rectangles
+const CONNECTION_VISUAL_OFFSET = 5; // Offset for connection lines to avoid fiber rectangles
 const dx = 26; // Offset for delete icon
 const dy = 8;  // Offset for delete icon
 
+const SPLITTER_WIDTH = 40;
+const SPLITTER_PADDING = 10;
+const SPLITTER_PORT_DIMENSION = FIBER_DIMENSION_PERPENDICULAR; // The size of the input/output squares
+const SPLITTER_PORT_SPACING = FIBER_SPACING;
+const ROTATE_ICON_SIZE = 8;
+const ROTATE_HANDLE_OFFSET = -10;
+
+const GRID_GAP = 10;
+
+const snapToGrid = (value: number): number => {
+    return Math.round(value / GRID_GAP) * GRID_GAP;
+};
+
+
+const drawGrid = (ctx: CanvasRenderingContext2D, width: number, height: number, gap: number) => {
+    ctx.save(); // Save the current context state (good practice)
+
+    ctx.strokeStyle = 'rgb(5, 5, 5)'; // A light, non-intrusive grey for the grid
+    ctx.lineWidth = 0.1;
+    ctx.beginPath();
+
+    // Draw vertical lines
+    for (let x = 0; x < width; x += gap) {
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+    }
+
+    // Draw horizontal lines
+    for (let y = 0; y < height; y += gap) {
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+    }
+
+    ctx.stroke(); // Draw all the lines at once
+    ctx.restore(); // Restore the context to its previous state
+};
+
+function getAABBOfRotatedRect(
+    rect: { width: number, height: number },
+    center: { x: number, y: number },
+    rotation: number
+): { x: number; y: number; width: number; height: number } {
+    const { width, height } = rect;
+    const { x: cx, y: cy } = center;
+
+    // The 4 corners of the un-rotated rectangle relative to its center
+    const corners = [
+        { x: -width / 2, y: -height / 2 },
+        { x: width / 2, y: -height / 2 },
+        { x: width / 2, y: height / 2 },
+        { x: -width / 2, y: height / 2 },
+    ];
+
+    const cosR = Math.cos(rotation);
+    const sinR = Math.sin(rotation);
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+    corners.forEach(corner => {
+        // Rotate the corner
+        const rotatedX = corner.x * cosR - corner.y * sinR;
+        const rotatedY = corner.x * sinR + corner.y * cosR;
+
+        // Translate back to world coordinates
+        const finalX = rotatedX + cx;
+        const finalY = rotatedY + cy;
+
+        // Update the min/max values
+        minX = Math.min(minX, finalX);
+        maxX = Math.max(maxX, finalX);
+        minY = Math.min(minY, finalY);
+        maxY = Math.max(maxY, finalY);
+    });
+
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
 const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
     initialCables: initialCablesFromProps, // Renamed to avoid conflict
+    objectsOnCanvas = [],
     width = window.innerWidth,
     height = window.innerHeight,
 }) => {
@@ -125,6 +233,10 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
     const [draggingCableInfo, setDraggingCableInfo] = useState<{ cableId: string; offsetX: number; offsetY: number } | null>(null);
     const [editingConnectionId, setEditingConnectionId] = useState<string | null>(null);
     const [draggingControlPoint, setDraggingControlPoint] = useState<{ connectionId: string; pointIndex: number; offsetX: number; offsetY: number } | null>(null);
+    const [managedSplitters, setManagedSplitters] = useState<SplitterState[]>([]);
+    const [draggingSplitterInfo, setDraggingSplitterInfo] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+    const [rotatingSplitterInfo, setRotatingSplitterInfo] = useState<{ id: string; startAngle: number; initialRotation: number; } | null>(null);
+
 
     // Debounce resize
     const [dimensions, setDimensions] = useState({ width, height });
@@ -144,13 +256,101 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
     }, [connections]);
 
 
-    const getFiberById = useCallback((fiberId: string): Fiber | undefined => {
+    const getConnectionPointById = useCallback((pointId: string): (Fiber | SplitterPort) | undefined => {
+        // Search in cables
         for (const cable of managedCables) {
-            const fiber = cable.fibers.find(f => f.id === fiberId);
+            const fiber = cable.fibers.find(f => f.id === pointId);
             if (fiber) return fiber;
         }
+        // Search in splitters
+        for (const splitter of managedSplitters) {
+            const inputPort = splitter.inputs.find(i => i.id === pointId);
+            if (inputPort) return inputPort;
+            const outputPort = splitter.outputs.find(o => o.id === pointId);
+            if (outputPort) return outputPort;
+        }
         return undefined;
-    }, [managedCables]);
+    }, [managedCables, managedSplitters]);
+
+    const calculateSplitterLayout = useCallback((splitters: SplitterState[]): SplitterState[] => {
+        return splitters.map(splitter => {
+            // First, calculate height and basic properties
+            const numPorts = Math.max(splitter.inputs.length, splitter.outputs.length);
+            const contentHeight = (numPorts * SPLITTER_PORT_DIMENSION) + Math.max(0, numPorts - 1) * SPLITTER_PORT_SPACING;
+            const splitterHeight = contentHeight + (2 * SPLITTER_PADDING);
+
+            const { x: centerX, y: centerY, rotation } = splitter;
+
+            // Helper to apply rotation to a point around the splitter's center
+            const getRotatedPoint = (point: { x: number; y: number }) => {
+                const translatedX = point.x - centerX;
+                const translatedY = point.y - centerY;
+                const cosR = Math.cos(rotation);
+                const sinR = Math.sin(rotation);
+                const rotatedX = translatedX * cosR - translatedY * sinR;
+                const rotatedY = translatedX * sinR + translatedY * cosR;
+                return { x: rotatedX + centerX, y: rotatedY + centerY };
+            };
+
+            const newInputs: SplitterPort[] = splitter.inputs.map((input, i) => {
+                // Calculate position as if rotation is 0
+                const baseY = centerY - splitterHeight / 2 + SPLITTER_PADDING + (i * (SPLITTER_PORT_DIMENSION + SPLITTER_PORT_SPACING));
+                const baseX = centerX - SPLITTER_WIDTH / 2;
+
+                const portRect = {
+                    x: baseX - SPLITTER_PORT_DIMENSION, // The corner of the port's rect
+                    y: baseY
+                };
+                const exitPoint = {
+                    x: portRect.x, // Exit from the outer edge
+                    y: portRect.y + SPLITTER_PORT_DIMENSION / 2
+                };
+
+                return {
+                    ...input,
+                    type: 'in',
+                    parentId: splitter.id,
+                    originalColor: input.color || 'grey',
+                    // Store the final, rotated positions in the state
+                    rect: { ...getRotatedPoint(portRect), width: SPLITTER_PORT_DIMENSION, height: SPLITTER_PORT_DIMENSION },
+                    exitPoint: getRotatedPoint(exitPoint),
+                };
+            });
+
+            // Repeat for outputs
+            const newOutputs: SplitterPort[] = splitter.outputs.map((output, i) => {
+                const baseY = centerY - splitterHeight / 2 + SPLITTER_PADDING + (i * (SPLITTER_PORT_DIMENSION + SPLITTER_PORT_SPACING));
+                const baseX = centerX + SPLITTER_WIDTH / 2;
+
+                const portRect = { x: baseX, y: baseY };
+                const exitPoint = {
+                    x: portRect.x + SPLITTER_PORT_DIMENSION,
+                    y: portRect.y + SPLITTER_PORT_DIMENSION / 2,
+                };
+
+                return {
+                    ...output,
+                    type: 'out',
+                    parentId: splitter.id,
+                    originalColor: output.color || 'grey',
+                    rect: { ...getRotatedPoint(portRect), width: SPLITTER_PORT_DIMENSION, height: SPLITTER_PORT_DIMENSION },
+                    exitPoint: getRotatedPoint(exitPoint),
+                };
+            });
+
+            return {
+                ...splitter,
+                width: SPLITTER_WIDTH,
+                height: splitterHeight,
+                inputs: newInputs,
+                outputs: newOutputs,
+                // Handles should not rotate with the body
+                dragHandle: { x: centerX, y: centerY - splitterHeight / 2 - DRAG_HANDLE_OFFSET, radius: DRAG_HANDLE_RADIUS },
+                rotateHandle: { x: centerX + SPLITTER_WIDTH / 2 + ROTATE_HANDLE_OFFSET, y: centerY - splitterHeight / 2, width: ROTATE_ICON_SIZE, height: ROTATE_ICON_SIZE }
+            };
+        });
+    }, []);
+
 
     const getCableById = useCallback((cableId?: string): Cable | undefined => {
         return managedCables.find(c => c.id === cableId);
@@ -180,7 +380,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
 
                     rawInputTubes.forEach(rawTubeInfo => {
                         const fibersForThisTube_raw = currentCable.fibers.filter(f => f.tubeId === rawTubeInfo.id);
-                        
+
                         const tubeFibers_processed: Fiber[] = [];
                         let fiberContentHeightInTube = 0;
 
@@ -188,9 +388,9 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                             fibersForThisTube_raw.forEach((fiberInfo, index) => {
                                 const fWidth = FIBER_DIMENSION_PARALLEL;
                                 const fHeight = FIBER_DIMENSION_PERPENDICULAR;
-                                
+
                                 const fiberAbsY = cableY + currentContentOffsetY_InCable + (index * (fHeight + FIBER_SPACING));
-                                
+
                                 let fiberAbsX_rect, fiberExitX;
                                 if (currentCable.originalType === 'in') {
                                     fiberAbsX_rect = cableX + cableViewWidth; // Fiber rectangle outside cable body
@@ -209,13 +409,13 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                                 });
                             });
                             fiberContentHeightInTube = (fibersForThisTube_raw.length * FIBER_DIMENSION_PERPENDICULAR) +
-                                                       ((fibersForThisTube_raw.length - 1) * FIBER_SPACING);
+                                ((fibersForThisTube_raw.length - 1) * FIBER_SPACING);
                         } else {
-                             fiberContentHeightInTube = FIBER_DIMENSION_PERPENDICULAR; // Min height for an empty tube
+                            fiberContentHeightInTube = FIBER_DIMENSION_PERPENDICULAR; // Min height for an empty tube
                         }
 
 
-                        const tubeRectX_abs = cableX + TUBE_PADDING;
+                        const tubeRectX_abs = cableX;
                         const tubeRectY_abs = cableY + currentContentOffsetY_InCable;
                         const tubeRectWidth = cableViewWidth - (2 * TUBE_PADDING);
                         const tubeRectHeight = fiberContentHeightInTube;
@@ -251,19 +451,19 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         };
                     }));
                     cableViewHeight = (currentCable.fibers.length * (FIBER_DIMENSION_PERPENDICULAR + FIBER_SPACING)) -
-                                    FIBER_SPACING + (2 * FIBER_SPACING); // Outer spacing for fibers
+                        FIBER_SPACING + (2 * FIBER_SPACING); // Outer spacing for fibers
                 }
             } else { // Horizontal Cable
                 cableViewHeight = CABLE_THICKNESS;
                 // Simplified: Fibers directly in cable for horizontal (can be expanded later)
                 let currentContentOffsetX_InCable = FIBER_SPACING;
-                 allUpdatedFibersForThisCable.push(...currentCable.fibers.map((fiberInfo, index) => {
+                allUpdatedFibersForThisCable.push(...currentCable.fibers.map((fiberInfo, index) => {
                     const fWidth = FIBER_DIMENSION_PERPENDICULAR; // For horizontal, parallel is perpendicular to cable body
-                    const fHeight = FIBER_DIMENSION_PARALLEL; 
+                    const fHeight = FIBER_DIMENSION_PARALLEL;
                     const fiberAbsX = cableX + currentContentOffsetX_InCable + (index * (fWidth + FIBER_SPACING));
-                    
+
                     let fiberAbsY_rect, fiberExitY;
-                     if (currentCable.y < dimensions.height / 2) { // Top edge
+                    if (currentCable.y < dimensions.height / 2) { // Top edge
                         fiberAbsY_rect = cableY + cableViewHeight;
                         fiberExitY = fiberAbsY_rect + fHeight;
                     } else { // Bottom edge
@@ -271,15 +471,15 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         fiberExitY = fiberAbsY_rect;
                     }
                     const fiberExitX = fiberAbsX + fWidth / 2;
-                     return {
+                    return {
                         ...fiberInfo,
                         originalColor: fiberInfo.color,
-                        rect: {x: fiberAbsX, y: fiberAbsY_rect, width: fWidth, height: fHeight},
-                        exitPoint: {x: fiberExitX, y: fiberExitY}
+                        rect: { x: fiberAbsX, y: fiberAbsY_rect, width: fWidth, height: fHeight },
+                        exitPoint: { x: fiberExitX, y: fiberExitY }
                     };
                 }));
-                 cableViewWidth = (currentCable.fibers.length * (FIBER_DIMENSION_PERPENDICULAR + FIBER_SPACING)) -
-                                 FIBER_SPACING + (2 * FIBER_SPACING);
+                cableViewWidth = (currentCable.fibers.length * (FIBER_DIMENSION_PERPENDICULAR + FIBER_SPACING)) -
+                    FIBER_SPACING + (2 * FIBER_SPACING);
             }
 
             // Clamp cable to canvas boundaries (after its height/width is known)
@@ -310,9 +510,26 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         let currentInCableBottomY = CANVAS_PADDING - cableVerticalSpacing;
         let currentOutCableBottomY = CANVAS_PADDING - cableVerticalSpacing;
 
+        const processedSplitters: SplitterState[] = objectsOnCanvas.map((s_input, index) => ({
+            ...s_input,
+            x: dimensions.width / 2, // Default position
+            y: (dimensions.height / 3) + (index * 150), // Stagger them vertically
+            width: SPLITTER_WIDTH,
+            height: 100, // Initial estimate, will be recalculated
+            rotation: 0,
+            // Temporarily initialize with empty arrays; layout function will populate them
+            inputs: s_input.inputs.map(i => ({ ...i })) as any,
+            outputs: s_input.outputs.map(o => ({ ...o })) as any,
+            dragHandle: { x: 0, y: 0, radius: DRAG_HANDLE_RADIUS },
+            rotateHandle: { x: 0, y: 0, width: ROTATE_ICON_SIZE, height: ROTATE_ICON_SIZE }
+        }));
+        setManagedSplitters(calculateSplitterLayout(processedSplitters));
+
+
+
         initialCablesFromProps.forEach((c_input) => {
             const orientation: 'vertical' | 'horizontal' = 'vertical'; // Default to vertical for now
-            
+
             // --- More Accurate Initial Height Estimation ---
             let estimatedCableVisualHeight = 0;
             if (orientation === 'vertical') {
@@ -323,10 +540,10 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         const fibersInTube = c_input.fibers.filter(f => f.tubeId === tubeInfo.id);
                         if (fibersInTube.length > 0) {
                             const fiberBlockHeight = (fibersInTube.length * FIBER_DIMENSION_PERPENDICULAR) +
-                                                   ((fibersInTube.length - 1) * FIBER_SPACING);
+                                ((fibersInTube.length - 1) * FIBER_SPACING);
                             totalContentHeight += fiberBlockHeight;
                         } else {
-                             totalContentHeight += FIBER_DIMENSION_PERPENDICULAR; // Min height for an empty tube
+                            totalContentHeight += FIBER_DIMENSION_PERPENDICULAR; // Min height for an empty tube
                         }
                         if (tubeIndex < c_input.tubes!.length - 1) {
                             totalContentHeight += TUBE_SPACING;
@@ -340,7 +557,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         : CABLE_THICKNESS; // Min height if empty
                 }
             } else { // Horizontal (Simplified estimation)
-                 estimatedCableVisualHeight = CABLE_THICKNESS;
+                estimatedCableVisualHeight = CABLE_THICKNESS;
             }
             // --- End Accurate Estimation ---
 
@@ -356,7 +573,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 initialY = currentOutCableBottomY + cableVerticalSpacing;
                 currentOutCableBottomY = initialY + estimatedCableVisualHeight;
             }
-            
+
             // Prepare a partial Cable object for calculateLayout
             processedCablesForLayout.push({
                 // These are from ICable (props)
@@ -364,8 +581,8 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 type: c_input.type, // Will be used by calculateLayout to determine fiber exit
                 // These are specific to the internal Cable interface
                 originalType: c_input.type,
-                fibers: c_input.fibers.map(f => ({...f, originalColor: f.color, rect: {x:0,y:0,width:0,height:0}, exitPoint: {x:0,y:0}})), // Pass raw fibers; layout calculates rects
-                tubes: c_input.tubes ? c_input.tubes.map(t => ({...t, rect: {x:0,y:0,width:0,height:0}, fibers: []})) : [], // Pass raw tubes
+                fibers: c_input.fibers.map(f => ({ ...f, originalColor: f.color, rect: { x: 0, y: 0, width: 0, height: 0 }, exitPoint: { x: 0, y: 0 } })), // Pass raw fibers; layout calculates rects
+                tubes: c_input.tubes ? c_input.tubes.map(t => ({ ...t, rect: { x: 0, y: 0, width: 0, height: 0 }, fibers: [] })) : [], // Pass raw tubes
                 x: initialX,
                 y: initialY,
                 orientation: orientation,
@@ -373,7 +590,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 dragHandle: { x: 0, y: 0, radius: DRAG_HANDLE_RADIUS },
             });
         });
-        
+
         setManagedCables(calculateLayout(processedCablesForLayout));
     }, [initialCablesFromProps, dimensions.width, dimensions.height, calculateLayout]);
 
@@ -386,11 +603,11 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             const tempConnections: Connection[] = []; // To provide to path generation for current batch
             const connectionsWithPathRegeneration = parsedInitialConnections.map(conn => {
                 if (conn.path.length === 0) { // Regenerate if path is missing
-                    const fiber1 = getFiberById(conn.fiber1Id);
-                    const fiber2 = getFiberById(conn.fiber2Id);
+                    const fiber1 = getConnectionPointById(conn.fiber1Id);
+                    const fiber2 = getConnectionPointById(conn.fiber2Id);
                     if (fiber1 && fiber2) {
-                        const cable1 = getCableById(fiber1.cableId);
-                        const cable2 = getCableById(fiber2.cableId);
+                        const cable1 = getCableById(fiber1.parentId);
+                        const cable2 = getCableById(fiber2.parentId);
                         if (cable1 && cable2) {
                             const newPath = generateManhattanPathWithAvoidance(fiber1, fiber2, cable1, cable2, tempConnections, dimensions.width, dimensions.height);
                             const newConn = {
@@ -409,13 +626,13 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 // if path exists, still add it to tempConnections if it's valid
                 // This part might need adjustment if existing paths also need to be collision-checked
                 // For now, only pushing newly generated paths to tempConnections for the current map op.
-                return conn; 
+                return conn;
             }).filter(Boolean) as Connection[]; // Filter out any nulls if fibers/cables weren't found
 
             setConnections(connectionsWithPathRegeneration);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [managedCables]); // Rerun when cables change, getFiberById/getCableById will have new cable data.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [managedCables]); // Rerun when cables change,  getConnectionPointById/getCableById will have new cable data.
 
 
     // --- Drawing Functions ---
@@ -426,6 +643,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         if (!ctx) return;
 
         ctx.clearRect(0, 0, dimensions.width, dimensions.height);
+        drawGrid(ctx, dimensions.width, dimensions.height, GRID_GAP);
 
         managedCables.forEach(cable => {
             ctx.fillStyle = 'black'; // Cable Body
@@ -478,9 +696,61 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             ctx.fill();
         });
 
+        managedSplitters.forEach(splitter => {
+            const { x, y, width, height, rotation, name, inputs, outputs, dragHandle, rotateHandle } = splitter;
+
+            // --- Draw the ROTATED body and name ---
+            ctx.save();
+            ctx.translate(x, y); // Move origin to splitter center
+            ctx.rotate(rotation);
+
+            // Draw Body
+            ctx.fillStyle = '#333';
+            ctx.fillRect(-width / 2, -height / 2, width, height);
+            ctx.strokeStyle = 'gold';
+            ctx.strokeRect(-width / 2, -height / 2, width, height);
+
+            // Draw Name
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(name, 0, 0); // Draw at the new (0,0) origin
+
+            ctx.restore(); // Restore canvas to normal coordinate system
+
+            // --- Draw the NON-ROTATED handles at their absolute positions ---
+            ctx.beginPath();
+            ctx.arc(dragHandle.x, dragHandle.y, dragHandle.radius, 0, 2 * Math.PI);
+            ctx.fillStyle = splitter.dragHandle.isActive ? 'lime' : 'green';
+            ctx.fill();
+
+            ctx.fillStyle = splitter.rotateHandle.isActive ? 'cyan' : 'blue';
+            ctx.fillRect(rotateHandle.x, rotateHandle.y, rotateHandle.width, rotateHandle.height);
+            ctx.strokeStyle = 'white';
+            ctx.font = 'bold 12px Arial';
+            ctx.strokeText('⟳', rotateHandle.x + rotateHandle.width / 2, rotateHandle.y + rotateHandle.height / 2);
+
+            // --- Draw the ports at their final, pre-calculated rotated positions ---
+            const drawPort = (port: SplitterPort) => {
+                // The port.rect.{x,y} are already the final rotated coordinates from calculateSplitterLayout
+                ctx.fillStyle = port.originalColor;
+                ctx.fillRect(port.rect.x, port.rect.y, port.rect.width, port.rect.height);
+
+                if (selectedFiberId1 === port.id) {
+                    ctx.strokeStyle = 'yellow';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(port.rect.x, port.rect.y, port.rect.width, port.rect.height);
+                }
+            };
+
+            inputs.forEach(drawPort);
+            outputs.forEach(drawPort);
+        });
+
         connections.forEach(conn => {
-            const fiber1 = getFiberById(conn.fiber1Id);
-            const fiber2 = getFiberById(conn.fiber2Id);
+            const fiber1 = getConnectionPointById(conn.fiber1Id);
+            const fiber2 = getConnectionPointById(conn.fiber2Id);
             if (!fiber1 || !fiber2 || conn.path.length === 0) return;
 
             ctx.lineWidth = CONNECTION_LINE_WIDTH;
@@ -584,6 +854,8 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             }
         });
 
+
+
         if (activePresplice) {
             ctx.beginPath();
             ctx.moveTo(activePresplice.lineStart.x, activePresplice.lineStart.y);
@@ -599,7 +871,13 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             ctx.fillRect(x - size / 2, y - size / 6, size, size / 3);
             ctx.fillRect(x - size / 6, y - size / 2, size / 3, size);
         }
-    }, [managedCables, connections, activePresplice, selectedFiberId1, editingConnectionId, dimensions.width, dimensions.height, getFiberById /* drawMarksOnPath removed as dep, assumed stable */]);
+
+
+
+
+
+
+    }, [managedCables, connections, managedSplitters, activePresplice, selectedFiberId1, editingConnectionId, dimensions.width, dimensions.height, getConnectionPointById /* drawMarksOnPath removed as dep, assumed stable */]);
 
     const drawMarksOnPath = (ctx: CanvasRenderingContext2D, path: { x: number, y: number }[], color: string) => {
         ctx.strokeStyle = 'black';
@@ -700,7 +978,70 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         }
         return false; // No overlap for perpendicular or non-aligned parallel segments
     }
-    
+
+    function doSegmentsCross(
+        s1p1: { x: number; y: number }, s1p2: { x: number; y: number },
+        s2p1: { x: number; y: number }, s2p2: { x: number; y: number }
+    ): boolean {
+        const isS1Horizontal = Math.abs(s1p1.y - s1p2.y) < 0.1;
+        const isS2Horizontal = Math.abs(s2p1.y - s2p2.y) < 0.1;
+        const isS1Vertical = Math.abs(s1p1.x - s1p2.x) < 0.1;
+        const isS2Vertical = Math.abs(s2p1.x - s2p2.x) < 0.1;
+
+        // Check for a horizontal segment crossing a vertical segment
+        if (isS1Horizontal && isS2Vertical) {
+            const s1MinX = Math.min(s1p1.x, s1p2.x);
+            const s1MaxX = Math.max(s1p1.x, s1p2.x);
+            const s2MinY = Math.min(s2p1.y, s2p2.y);
+            const s2MaxY = Math.max(s2p1.y, s2p2.y);
+            return s1p1.y > s2MinY && s1p1.y < s2MaxY && s2p1.x > s1MinX && s2p1.x < s1MaxX;
+        }
+
+        // Check for a vertical segment crossing a horizontal segment
+        if (isS1Vertical && isS2Horizontal) {
+            const s1MinY = Math.min(s1p1.y, s1p2.y);
+            const s1MaxY = Math.max(s1p1.y, s1p2.y);
+            const s2MinX = Math.min(s2p1.x, s2p2.x);
+            const s2MaxX = Math.max(s2p1.x, s2p2.x);
+            return s1p1.x > s2MinX && s1p1.x < s2MaxX && s2p1.y > s1MinY && s2p1.y < s1MaxY;
+        }
+
+        return false; // Not a perpendicular crossing
+    }
+
+    function countPathCrossings(
+        proposedPath: { x: number; y: number }[],
+        existingConnections: Connection[],
+        ownConnectionIdToIgnore?: string
+    ): number {
+        if (proposedPath.length < 2) return 0;
+        let crossingCount = 0;
+
+        for (let i = 0; i < proposedPath.length - 1; i++) {
+            const pSegStart = proposedPath[i];
+            const pSegEnd = proposedPath[i + 1];
+            // Skip zero-length segments
+            if (Math.abs(pSegStart.x - pSegEnd.x) < 0.1 && Math.abs(pSegStart.y - pSegEnd.y) < 0.1) continue;
+
+            for (const conn of existingConnections) {
+                if (ownConnectionIdToIgnore && conn.id === ownConnectionIdToIgnore) continue;
+
+                for (let j = 0; j < conn.path.length - 1; j++) {
+                    const eSegStart = conn.path[j];
+                    const eSegEnd = conn.path[j + 1];
+                    // Skip zero-length segments
+                    if (Math.abs(eSegStart.x - eSegEnd.x) < 0.1 && Math.abs(eSegStart.y - eSegEnd.y) < 0.1) continue;
+
+                    if (doSegmentsCross(pSegStart, pSegEnd, eSegStart, eSegEnd)) {
+                        crossingCount++;
+                    }
+                }
+            }
+        }
+        return crossingCount;
+    }
+
+
     function pathCollides(
         proposedPath: { x: number; y: number }[],
         existingConnections: Connection[],
@@ -728,12 +1069,13 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         length: number;
         bends: number;
         isClose: boolean;
+        crossings: number;
         hardCollides: boolean;
         cost: number;
     }
 
     const generateManhattanPathWithAvoidance = useCallback((
-        startFiber: Fiber, endFiber: Fiber,
+        startFiber: Fiber | SplitterPort, endFiber: Fiber | SplitterPort,
         startCable: Cable, endCable: Cable,
         existingConnections: Connection[],
         canvasWidth: number, canvasHeight: number,
@@ -791,6 +1133,19 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             return false;
         };
 
+        const splitterBodyRects = managedSplitters.map(splitter => {
+            // Don't check for collision with the splitter we are connecting to
+            if (splitter.id === startFiber.parentId || splitter.id === endFiber.parentId) {
+                return null;
+            }
+            return getAABBOfRotatedRect(
+                { width: splitter.width, height: splitter.height },
+                { x: splitter.x, y: splitter.y },
+                splitter.rotation
+            );
+        }).filter(Boolean) as { x: number; y: number; width: number; height: number }[];
+
+
         const addCandidate = (rawPath: { x: number, y: number }[]) => {
             const cleanedPath = rawPath.reduce((acc, point, index) => {
                 if (index === 0 || Math.abs(point.x - acc[acc.length - 1].x) > 0.01 || Math.abs(point.y - acc[acc.length - 1].y) > 0.01) {
@@ -831,28 +1186,33 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             const tooCloseToConnection = !hardCollisionWithConnection ? pathIsTooClose(cleanedPath, existingConnections, PROXIMITY_MARGIN, connectionIdToUpdate) : false;
             const intersectsOtherFibers = doesPathIntersectRectsList(cleanedPath, otherFiberRects, FIBER_AVOIDANCE_MARGIN);
             const intersectsOtherCables = doesPathIntersectRectsList(cleanedPath, otherCableBodyRects, CABLE_AVOIDANCE_MARGIN);
+            const crossings = countPathCrossings(cleanedPath, existingConnections, connectionIdToUpdate);
+            const intersectsSplitters = doesPathIntersectRectsList(cleanedPath, splitterBodyRects, CABLE_AVOIDANCE_MARGIN);
 
             let usesCentralChannel = false;
             for (let i = 0; i < cleanedPath.length - 1; i++) {
                 const p1Seg = cleanedPath[i]; const p2Seg = cleanedPath[i + 1];
-                if (Math.abs(p1Seg.y - p2Seg.y) < 0.1) {
+                if (Math.abs(p1Seg.y - p2Seg.y) < 10.1) {
                     if (Math.abs(p1Seg.y - centralY) < CENTRAL_CHANNEL_TOLERANCE) { usesCentralChannel = true; break; }
-                } else if (Math.abs(p1Seg.x - p2Seg.x) < 0.1) {
+                } else if (Math.abs(p1Seg.x - p2Seg.x) < 10.1) {
                     if (Math.abs(p1Seg.x - centralX) < CENTRAL_CHANNEL_TOLERANCE) { usesCentralChannel = true; break; }
                 }
             }
 
-            let cost = pathLength + (bends * BEND_PENALTY);
+            let cost = pathLength + (bends * BEND_PENALTY) + (crossings * CROSSING_PENALTY);
             if (tooCloseToConnection) cost += PROXIMITY_PENALTY;
             if (hardCollisionWithConnection) cost += 100000;
             if (intersectsOtherFibers) cost += FIBER_INTERSECTION_PENALTY;
             if (intersectsOtherCables) cost += CABLE_INTERSECTION_PENALTY;
             if (usesCentralChannel) cost -= CENTRAL_CHANNEL_REWARD;
+            if (intersectsSplitters) cost += SPLITTER_INTERSECTION_PENALTY;
 
             candidatePathsStorage.push({
                 path: cleanedPath, length: pathLength, bends: bends,
+                crossings: crossings, // <-- ADD THIS
                 isClose: tooCloseToConnection, hardCollides: hardCollisionWithConnection, cost: cost
             });
+
         };
 
         if (Math.abs(p1.x - p2.x) < 0.1 || Math.abs(p1.y - p2.y) < 0.1) { addCandidate([p1, p2]); }
@@ -863,12 +1223,20 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         addCandidate([{ x: p1.x, y: p1.y }, { x: midXOverall, y: p1.y }, { x: midXOverall, y: p2.y }, { x: p2.x, y: p2.y }]);
         addCandidate([{ x: p1.x, y: p1.y }, { x: p1.x, y: midYOverall }, { x: p2.x, y: midYOverall }, { x: p2.x, y: p2.y }]);
 
-        const offsets = [0, 25, -25, 50, -50, 75, -75, 100, -100]; // Offsets for routing channels
+        function generateOffset(n: number): number[] {
+            let arr = [0]
+            for (let i = 1; i < n; i += 2) {
+                arr[i] = Math.abs(arr[i - 1]) + 15
+                arr[i + 1] = -1 * arr[i]
+            }
+            return arr
+        }
+        const offsets = generateOffset(50)
         for (const offset of offsets) {
             addCandidate([{ x: p1.x, y: p1.y }, { x: centralX + offset, y: p1.y }, { x: centralX + offset, y: p2.y }, { x: p2.x, y: p2.y }]);
             addCandidate([{ x: p1.x, y: p1.y }, { x: p1.x, y: centralY + offset }, { x: p2.x, y: centralY + offset }, { x: p2.x, y: p2.y }]);
         }
-        
+
         const exitDistances = [CABLE_THICKNESS + 10, CABLE_THICKNESS + 30, CABLE_THICKNESS + 50];
         for (const exitDistance of exitDistances) {
             let exitP1X_strat3 = p1.x, exitP1Y_strat3 = p1.y; let tempPath_strat3: { x: number, y: number }[];
@@ -902,7 +1270,26 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             if (startFiber.id !== endFiber.id) { chosenPath.push({ ...endFiber.exitPoint }); }
             else { chosenPath.push({ ...startFiber.exitPoint }); }
         } else {
+            const getRandomColor = () => {
+                var letters = '0123456789ABCDEF';
+                var color = '#';
+                for (var i = 0; i < 6; i++) {
+                    color += letters[Math.floor(Math.random() * 16)];
+                }
+                return color;
+            }
             candidatePathsStorage.sort((a, b) => a.cost - b.cost);
+            // console.log("OpticalFiberCanvas: Candidate paths generated:", candidatePathsStorage);
+            // console.log(candidatePathsStorage.slice(10, 11));
+
+            // const newConnection: Connection[] = candidatePathsStorage.slice(10, 11).map((newPath) => {
+            //     const color = getRandomColor();
+            //     return {
+            //     id: `conn-${v4()}`, fiber1Id: startFiber.id, fiber2Id: endFiber.id, path: newPath.path,
+            //     color1: color, color2: color,
+            //     isMarked1: false, isMarked2: true,
+            // }});
+            // setConnections(prev => [...prev, ...newConnection]);
             const bestPathInfo = candidatePathsStorage[0];
             chosenPath = bestPathInfo.path;
         }
@@ -930,14 +1317,14 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             }
         }
         return finalPath;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [managedCables /* To get otherFiberRects, otherCableBodyRects */]);
 
 
     function isPointInsideRectangle(pos: { x: number, y: number }, rect: { x: number, y: number, width: number, height: number }): boolean {
         return pos.x >= rect.x && pos.x <= rect.x + rect.width && pos.y >= rect.y && pos.y <= rect.y + rect.height;
     }
-    
+
     const getMousePos = useCallback((e: React.MouseEvent | MouseEvent): { x: number, y: number } => {
         const canvas = canvasRef.current;
         if (!canvas) return { x: 0, y: 0 };
@@ -949,10 +1336,37 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
         const pos = getMousePos(e);
 
+        for (const splitter of managedSplitters) {
+            // --- ADD THIS LOG to see if the check is running ---
+            // console.log(`Checking splitter ${splitter.name} at x:${splitter.x}, y:${splitter.y}`);
+
+            // Check Drag Handle
+            const distDrag = Math.sqrt((pos.x - splitter.dragHandle.x) ** 2 + (pos.y - splitter.dragHandle.y) ** 2);
+            if (distDrag <= splitter.dragHandle.radius + 2) {
+                setDraggingSplitterInfo({ id: splitter.id, offsetX: splitter.x - pos.x, offsetY: splitter.y - pos.y });
+                // Set active state for immediate visual feedback
+                setManagedSplitters(prev => prev.map(s => s.id === splitter.id ? { ...s, dragHandle: { ...s.dragHandle, isActive: true } } : s));
+                return;
+            }
+
+            // Check Rotate Handle
+            const rh = splitter.rotateHandle;
+            if (pos.x >= rh.x && pos.x <= rh.x + rh.width && pos.y >= rh.y && pos.y <= rh.y + rh.height) {
+                const startAngle = Math.atan2(pos.y - splitter.y, pos.x - splitter.y);
+                setRotatingSplitterInfo({ id: splitter.id, startAngle, initialRotation: splitter.rotation });
+                // Set active state
+                setManagedSplitters(prev => prev.map(s => s.id === splitter.id ? { ...s, rotateHandle: { ...s.rotateHandle, isActive: true } } : s));
+                return;
+            }
+        }
+
+
+
+
         if (editingConnectionId) {
             const conn = connections.find(c => c.id === editingConnectionId);
             if (conn) {
-                if(conn.deleteIconRect){ // Check delete icon first
+                if (conn.deleteIconRect) { // Check delete icon first
                     const delRect1 = { x: conn.path[conn.path.length - 1].x + dx - 16, y: conn.path[conn.path.length - 1].y - dy, width: conn.deleteIconRect.width, height: conn.deleteIconRect.height };
                     const delRect2 = { x: conn.path[0].x - dx, y: conn.path[0].y - dy, width: conn.deleteIconRect.width, height: conn.deleteIconRect.height };
                     if (isPointInsideRectangle(pos, delRect1) || isPointInsideRectangle(pos, delRect2)) {
@@ -969,7 +1383,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         return;
                     }
                 }
-                 if (conn.path.length >= 2) { // Check for clicking midpoint add handles
+                if (conn.path.length >= 2) { // Check for clicking midpoint add handles
                     for (let i = 0; i < conn.path.length - 1; i++) {
                         const p1 = conn.path[i]; const p2 = conn.path[i + 1];
                         if (Math.abs(p1.x - p2.x) + Math.abs(p1.y - p2.y) <= MIDPOINT_ADD_HANDLE_RADIUS * 4) continue;
@@ -977,9 +1391,9 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         const distToMidpoint = Math.sqrt((pos.x - midX) ** 2 + (pos.y - midY) ** 2);
                         if (distToMidpoint <= MIDPOINT_ADD_HANDLE_RADIUS + 2) {
                             const newPointFromClick = { x: pos.x, y: pos.y };
-                            const newPath = [ ...conn.path.slice(0, i + 1), newPointFromClick, ...conn.path.slice(i + 1) ];
+                            const newPath = [...conn.path.slice(0, i + 1), newPointFromClick, ...conn.path.slice(i + 1)];
                             const newPointIndex = i + 1;
-                            setConnections(prevConns => prevConns.map(c => 
+                            setConnections(prevConns => prevConns.map(c =>
                                 c.id === conn.id ? { ...c, path: newPath, controlPoints: newPath.map(p_ => ({ ...p_, radius: CONNECTION_CONTROL_POINT_RADIUS })) } : c
                             ));
                             setDraggingControlPoint({ connectionId: conn.id, pointIndex: newPointIndex, offsetX: newPointFromClick.x - pos.x, offsetY: newPointFromClick.y - pos.y });
@@ -1003,25 +1417,126 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         if (activePresplice) {
             const { x, y, size } = activePresplice.plusIconPosition;
             if (pos.x >= x - size / 2 && pos.x <= x + size / 2 && pos.y >= y - size / 2 && pos.y <= y + size / 2) {
-                const fiber1 = getFiberById(activePresplice.fiber1Id);
-                const fiber2 = getFiberById(activePresplice.fiber2Id);
-                if (fiber1 && fiber2) {
-                    const cable1 = getCableById(fiber1.cableId);
-                    const cable2 = getCableById(fiber2.cableId);
-                    if (cable1 && cable2) {
-                        const newPath = generateManhattanPathWithAvoidance(fiber1, fiber2, cable1, cable2, connections, dimensions.width, dimensions.height);
-                        const newConnection: Connection = {
-                            id: `conn-${Date.now()}`, fiber1Id: fiber1.id, fiber2Id: fiber2.id, path: newPath,
-                            color1: fiber1.originalColor, color2: fiber2.originalColor,
-                            isMarked1: fiber1.isMarked, isMarked2: fiber2.isMarked,
+
+                const point1 = getConnectionPointById(activePresplice.fiber1Id);
+                const point2 = getConnectionPointById(activePresplice.fiber2Id);
+
+                if (point1 && point2) {
+                    // Find the parent of each point (could be a Cable or a Splitter)
+                    const parent1 = managedCables.find(c => c.id === point1.parentId) || managedSplitters.find(s => s.id === point1.parentId);
+                    const parent2 = managedCables.find(c => c.id === point2.parentId) || managedSplitters.find(s => s.id === point2.parentId);
+
+                    if (parent1 && parent2) {
+                        // This helper function "adapts" a Splitter to look like a Cable
+                        // so our existing pathfinder can use it without modification.
+                        const adaptToCable = (parent: Cable | SplitterState): Cable => {
+                            if ('fibers' in parent) return parent; // It's already a Cable, return it.
+
+                            // It's a Splitter, so create a temporary "dummy" Cable object.
+                            return {
+                                id: parent.id,
+                                originalType: 'in', // These properties can be defaults
+                                orientation: 'vertical',
+                                x: parent.x,
+                                y: parent.y,
+                                // Provide default/empty properties to satisfy the Cable type
+                                fibers: [],
+                                rect: { x: parent.x - parent.width / 2, y: parent.y - parent.height / 2, width: parent.width, height: parent.height },
+                                dragHandle: parent.dragHandle,
+                                type: 'in'
+                            };
                         };
+
+                        // Generate the path using the adapted parents
+                        const newPath = generateManhattanPathWithAvoidance(
+                            point1 as Fiber, // Cast is safe as SplitterPort has the required properties
+                            point2 as Fiber,
+                            adaptToCable(parent1), // Adapt the first parent
+                            adaptToCable(parent2), // Adapt the second parent
+                            connections,
+                            dimensions.width,
+                            dimensions.height
+                        );
+
+                        // Create the final connection object
+                        const newConnection: Connection = {
+                            id: `conn-${Date.now()}`,
+                            fiber1Id: point1.id,
+                            fiber2Id: point2.id,
+                            path: newPath,
+                            color1: point1.originalColor,
+                            color2: point2.originalColor,
+                            isMarked1: point1.isMarked,
+                            isMarked2: point2.isMarked,
+                            controlPoints: newPath.map(p => ({ ...p, radius: CONNECTION_CONTROL_POINT_RADIUS }))
+                        };
+
+                        // Add the new connection to our state
                         setConnections(prev => [...prev, newConnection]);
-                        setActivePresplice(null); setSelectedFiberId1(null); setEditingConnectionId(null);
-                        return;
                     }
                 }
+
+                // Reset state after creating the connection
+                setActivePresplice(null);
+                setSelectedFiberId1(null);
+                setEditingConnectionId(null);
+                return; // Important: Stop further processing of the click
             }
         }
+        // 1. Create a single list of ALL connectable points.
+        const allConnectablePoints: (Fiber | SplitterPort)[] = [
+            ...managedCables.flatMap(c => c.fibers),
+            ...managedSplitters.flatMap(s => [...s.inputs, ...s.outputs])
+        ];
+
+        // 2. Get all points that are already part of a connection.
+        const connectedPointIds = new Set(connections.flatMap(c => [c.fiber1Id, c.fiber2Id]));
+
+        // 3. Loop through the unified list to find what was clicked.
+        for (const point of allConnectablePoints) {
+            if (connectedPointIds.has(point.id)) continue; // Skip already connected points
+
+            // Check if the point was clicked. We use a different method for rotated splitter ports.
+            let wasClicked = false;
+            if ('originalType' in point) { // It's a Fiber from a Cable
+                wasClicked = isPointInsideRectangle(pos, point.rect);
+            } else { // It's a SplitterPort
+                // For rotated ports, a simple circular hotspot check is easiest and most reliable.
+                const portCenterX = point.rect.x + point.rect.width / 2;
+                const portCenterY = point.rect.y + point.rect.height / 2;
+                const dist = Math.sqrt((pos.x - portCenterX) ** 2 + (pos.y - portCenterY) ** 2);
+                wasClicked = dist <= SPLITTER_PORT_DIMENSION; // Use dimension as radius
+            }
+
+            if (wasClicked) {
+                // THE LOGIC BELOW IS THE SAME AS YOUR ORIGINAL FIBER-ONLY LOGIC
+                // It works perfectly now because `getConnectionPointById` is generic.
+                if (!selectedFiberId1) {
+                    // This is the first point selected. Highlight it.
+                    setSelectedFiberId1(point.id);
+                    setEditingConnectionId(null);
+                    setActivePresplice(null);
+                } else if (selectedFiberId1 !== point.id) {
+                    // This is the second point. Create a presplice.
+                    const firstPoint = getConnectionPointById(selectedFiberId1);
+                    if (firstPoint) {
+                        setActivePresplice({
+                            fiber1Id: firstPoint.id,
+                            fiber2Id: point.id,
+                            lineStart: firstPoint.exitPoint,
+                            lineEnd: point.exitPoint,
+                            plusIconPosition: {
+                                x: (firstPoint.exitPoint.x + point.exitPoint.x) / 2,
+                                y: (firstPoint.exitPoint.y + point.exitPoint.y) / 2,
+                                size: PRESPLICE_PLUS_SIZE,
+                            }
+                        });
+                    }
+                }
+                return; // Stop after handling the click
+            }
+        }
+        setSelectedFiberId1(null); setActivePresplice(null); setEditingConnectionId(null);
 
         const connectedFiberIds = new Set(connections.flatMap(c => [c.fiber1Id, c.fiber2Id]));
         for (const cable of managedCables) {
@@ -1031,7 +1546,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                     if (!selectedFiberId1) {
                         setSelectedFiberId1(fiber.id); setActivePresplice(null); setEditingConnectionId(null);
                     } else if (selectedFiberId1 !== fiber.id) {
-                        const firstFiber = getFiberById(selectedFiberId1);
+                        const firstFiber = getConnectionPointById(selectedFiberId1);
                         if (firstFiber) {
                             setActivePresplice({
                                 fiber1Id: selectedFiberId1, fiber2Id: fiber.id,
@@ -1053,9 +1568,9 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             for (let i = 0; i < conn.path.length - 1; i++) {
                 const p1 = conn.path[i]; const p2 = conn.path[i + 1];
                 const distToLine = Math.abs((p2.y - p1.y) * pos.x - (p2.x - p1.x) * pos.y + p2.x * p1.y - p2.y * p1.x) /
-                                 Math.sqrt((p2.y - p1.y) ** 2 + (p2.x - p1.x) ** 2);
+                    Math.sqrt((p2.y - p1.y) ** 2 + (p2.x - p1.x) ** 2);
                 const withinBounds = (Math.min(p1.x, p2.x) - 5 <= pos.x && pos.x <= Math.max(p1.x, p2.x) + 5) &&
-                                   (Math.min(p1.y, p2.y) - 5 <= pos.y && pos.y <= Math.max(p1.y, p2.y) + 5);
+                    (Math.min(p1.y, p2.y) - 5 <= pos.y && pos.y <= Math.max(p1.y, p2.y) + 5);
                 if (distToLine < 5 && withinBounds) {
                     setEditingConnectionId(conn.id);
                     setConnections(prevConns => prevConns.map(c => c.id === conn.id ? {
@@ -1073,42 +1588,154 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             }
         }
         setSelectedFiberId1(null); setActivePresplice(null); setEditingConnectionId(null);
-    }, [managedCables, activePresplice, selectedFiberId1, connections, editingConnectionId, getFiberById, getCableById, generateManhattanPathWithAvoidance, dimensions.width, dimensions.height, getMousePos]);
+    }, [
+        managedCables,
+        getMousePos,
+        activePresplice,
+        selectedFiberId1,
+        managedCables,
+        managedSplitters,
+        connections,
+        getConnectionPointById,
+        activePresplice,
+        selectedFiberId1,
+        connections,
+        editingConnectionId,
+        getConnectionPointById,
+        getCableById,
+        generateManhattanPathWithAvoidance,
+        dimensions.width, dimensions.height,
+        getMousePos
+    ]);
+
+
+    const updateAttachedConnections = useCallback((parentId: string) => {
+        setConnections(prevConns => prevConns.map(conn => {
+            const point1 = getConnectionPointById(conn.fiber1Id);
+            const point2 = getConnectionPointById(conn.fiber2Id);
+
+            // Check if this connection is attached to the item that moved/rotated
+            if ((point1 && point1.parentId === parentId) || (point2 && point2.parentId === parentId)) {
+                const parent1 = managedCables.find(c => c.id === point1?.parentId) || managedSplitters.find(s => s.id === point1?.parentId);
+                const parent2 = managedCables.find(c => c.id === point2?.parentId) || managedSplitters.find(s => s.id === point2?.parentId);
+
+                if (point1 && point2 && parent1 && parent2) {
+                    // "Adapt" a splitter to look like a cable for the pathfinder function
+                    const adaptToCable = (parent: Cable | SplitterState): Cable => {
+                        if ('fibers' in parent) return parent; // It's already a Cable
+                        // It's a Splitter, create a dummy Cable-like object
+                        return {
+                            id: parent.id,
+                            originalType: 'in',
+                            orientation: 'vertical', // Pathfinding doesn't strictly need this for a splitter
+                            x: parent.x,
+                            y: parent.y,
+                            // Provide empty properties to satisfy the type
+                            fibers: [],
+                            rect: { x: parent.x, y: parent.y, width: parent.width, height: parent.height },
+                            dragHandle: parent.dragHandle,
+                            type: 'in'
+                        };
+                    };
+
+                    const newPath = generateManhattanPathWithAvoidance(
+                        point1 as Fiber, // Cast is safe because they share the connectable properties
+                        point2 as Fiber,
+                        adaptToCable(parent1),
+                        adaptToCable(parent2),
+                        prevConns.filter(c => c.id !== conn.id),
+                        dimensions.width,
+                        dimensions.height,
+                        conn.id
+                    );
+                    return { ...conn, path: newPath, controlPoints: newPath.map(p => ({ ...p, radius: 4 })) };
+                }
+            }
+            return conn;
+        }));
+    }, [getConnectionPointById, managedCables, managedSplitters, generateManhattanPathWithAvoidance, dimensions]);
 
     const handleMouseMove = useCallback((e: React.MouseEvent | MouseEvent) => { // Allow MouseEvent for window listener
         const pos = getMousePos(e);
+
+        if (draggingSplitterInfo) {
+            let movedSplitterId: string | null = null;
+
+            // 1. Update the splitter's position
+            setManagedSplitters(prevSplitters => {
+                const newSplitters = prevSplitters.map(s => {
+                    if (s.id === draggingSplitterInfo.id) {
+                        movedSplitterId = s.id;
+                        return { ...s, x: snapToGrid(pos.x + draggingSplitterInfo.offsetX), y: snapToGrid(pos.y + draggingSplitterInfo.offsetY) };
+                    }
+                    return s;
+                });
+                // 2. Recalculate layout to update port/handle positions
+                return calculateSplitterLayout(newSplitters);
+            });
+
+            // 3. Regenerate paths for connections attached to the moved splitter
+            if (movedSplitterId) {
+                // updateAttachedConnections(movedSplitterId);
+            }
+            return; // Done
+        }
+
+        // --- Logic for rotating a Splitter ---
+        if (rotatingSplitterInfo) {
+            const splitter = managedSplitters.find(s => s.id === rotatingSplitterInfo.id);
+            if (splitter) {
+                const currentAngle = Math.atan2(pos.y - splitter.y, pos.x - splitter.x);
+                const deltaAngle = currentAngle - rotatingSplitterInfo.startAngle;
+                const newRotation = rotatingSplitterInfo.initialRotation + deltaAngle;
+
+                // 1. Update the splitter's rotation
+                setManagedSplitters(prevSplitters => {
+                    const newSplitters = prevSplitters.map(s =>
+                        s.id === rotatingSplitterInfo.id ? { ...s, rotation: newRotation } : s
+                    );
+                    // 2. Recalculate layout to update port exitPoints based on new rotation
+                    return calculateSplitterLayout(newSplitters);
+                });
+
+                // 3. Regenerate paths for attached connections
+                // updateAttachedConnections(rotatingSplitterInfo.id);
+            }
+            return; // Done
+        }
 
         if (draggingCableInfo) {
             setManagedCables(prevCables => {
                 let newCablesArr = prevCables.map(c => {
                     if (c.id === draggingCableInfo.cableId) {
-                        let newX = pos.x + draggingCableInfo.offsetX;
-                        let newY = pos.y + draggingCableInfo.offsetY;
+                        let newX = snapToGrid(pos.x + draggingCableInfo.offsetX);
+                        let newY = snapToGrid(pos.y + draggingCableInfo.offsetY);
+
                         let newOrientation = c.orientation;
-                        
+
                         const currentVisualWidth = c.rect.width; // Use actual calculated width
                         const currentVisualHeight = c.rect.height; // Use actual calculated height
 
                         if (c.orientation === 'vertical') {
                             if (newY < -EDGE_TRANSFORM_THRESHOLD) {
-                                newOrientation = 'horizontal'; newY = CANVAS_PADDING / 2;
+                                newOrientation = 'horizontal'; newY = snapToGrid(CANVAS_PADDING / 2);
                                 newX = Math.max(0, Math.min(dimensions.width - currentVisualHeight, newX)); // width becomes height
                             } else if (newY + currentVisualHeight > dimensions.height + EDGE_TRANSFORM_THRESHOLD) {
-                                newOrientation = 'horizontal'; newY = dimensions.height - CABLE_THICKNESS - CANVAS_PADDING / 2;
+                                newOrientation = 'horizontal'; newY = snapToGrid(dimensions.height - CABLE_THICKNESS - CANVAS_PADDING / 2);
                                 newX = Math.max(0, Math.min(dimensions.width - currentVisualHeight, newX)); // width becomes height
                             }
                         } else { // Horizontal
                             if (newX < -EDGE_TRANSFORM_THRESHOLD) {
-                                newOrientation = 'vertical'; newX = CANVAS_PADDING / 2;
+                                newOrientation = 'vertical'; newX = snapToGrid(CANVAS_PADDING / 2);
                                 newY = Math.max(0, Math.min(dimensions.height - currentVisualWidth, newY)); // height becomes width
                             } else if (newX + currentVisualWidth > dimensions.width + EDGE_TRANSFORM_THRESHOLD) {
-                                newOrientation = 'vertical'; newX = dimensions.width - CABLE_THICKNESS - CANVAS_PADDING / 2;
+                                newOrientation = 'vertical'; newX = snapToGrid(dimensions.width - CABLE_THICKNESS - CANVAS_PADDING / 2);
                                 newY = Math.max(0, Math.min(dimensions.height - currentVisualWidth, newY)); // height becomes width
                             }
                         }
                         // Basic overlap prevention with other static cables
-                        const draggedCableProjectedRect = { 
-                            x: newX, y: newY, 
+                        const draggedCableProjectedRect = {
+                            x: newX, y: newY,
                             width: newOrientation === c.orientation ? currentVisualWidth : currentVisualHeight, // Adjust for potential orientation change
                             height: newOrientation === c.orientation ? currentVisualHeight : currentVisualWidth
                         };
@@ -1129,7 +1756,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         if (!isOverlapping) {
                             return { ...c, x: newX, y: newY, orientation: newOrientation, isDragging: true };
                         } else {
-                             // If overlapping, don't update position but keep dragging state
+                            // If overlapping, don't update position but keep dragging state
                             return { ...c, isDragging: true };
                         }
                     }
@@ -1137,25 +1764,25 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 });
                 // Recalculate layout for ALL cables, as one cable's change might affect others or connection lines
                 const reLayoutedCables = calculateLayout(newCablesArr.map(nc => ({ ...nc, isDragging: draggingCableInfo?.cableId === nc.id })));
-                
-                // Update connections based on new cable/fiber positions
-                setConnections(prevConns => prevConns.map(conn => {
-                    const fiber1 = reLayoutedCables.flatMap(ca => ca.fibers).find(f => f.id === conn.fiber1Id);
-                    const fiber2 = reLayoutedCables.flatMap(ca => ca.fibers).find(f => f.id === conn.fiber2Id);
-                    const cable1 = reLayoutedCables.find(ca => ca.id === fiber1?.cableId);
-                    const cable2 = reLayoutedCables.find(ca => ca.id === fiber2?.cableId);
 
-                    if (fiber1 && fiber2 && cable1 && cable2) {
-                         const newPath = generateManhattanPathWithAvoidance(fiber1, fiber2, cable1, cable2, prevConns.filter(c => c.id !== conn.id), dimensions.width, dimensions.height, conn.id);
-                        let updatedConn = { ...conn, path: newPath };
-                        if (editingConnectionId === conn.id) { // If it was being edited, update its CPs too
-                            updatedConn.controlPoints = newPath.map(p => ({ ...p, radius: CONNECTION_CONTROL_POINT_RADIUS }));
-                            // Keep deleteIconRect logic if needed, or simplify
-                        }
-                        return updatedConn;
-                    }
-                    return conn; // Return original connection if fibers/cables not found
-                }));
+                // Update connections based on new cable/fiber positions
+                // setConnections(prevConns => prevConns.map(conn => {
+                //     const fiber1 = reLayoutedCables.flatMap(ca => ca.fibers).find(f => f.id === conn.fiber1Id);
+                //     const fiber2 = reLayoutedCables.flatMap(ca => ca.fibers).find(f => f.id === conn.fiber2Id);
+                //     const cable1 = reLayoutedCables.find(ca => ca.id === fiber1?.cableId);
+                //     const cable2 = reLayoutedCables.find(ca => ca.id === fiber2?.cableId);
+
+                //     if (fiber1 && fiber2 && cable1 && cable2) {
+                //         const newPath = generateManhattanPathWithAvoidance(fiber1, fiber2, cable1, cable2, prevConns.filter(c => c.id !== conn.id), dimensions.width, dimensions.height, conn.id);
+                //         let updatedConn = { ...conn, path: newPath };
+                //         if (editingConnectionId === conn.id) { // If it was being edited, update its CPs too
+                //             updatedConn.controlPoints = newPath.map(p => ({ ...p, radius: CONNECTION_CONTROL_POINT_RADIUS }));
+                //             // Keep deleteIconRect logic if needed, or simplify
+                //         }
+                //         return updatedConn;
+                //     }
+                //     return conn; // Return original connection if fibers/cables not found
+                // }));
                 return reLayoutedCables;
             });
 
@@ -1166,15 +1793,15 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                     const pointIndex = draggingControlPoint.pointIndex;
                     if (pointIndex < 0 || pointIndex >= currentPath.length) return conn;
 
-                    let newPointX = pos.x + draggingControlPoint.offsetX;
-                    let newPointY = pos.y + draggingControlPoint.offsetY;
-                    newPointX = Math.max(0, Math.min(dimensions.width, newPointX));
-                    newPointY = Math.max(0, Math.min(dimensions.height, newPointY));
+                    let newPointX = snapToGrid(pos.x + draggingControlPoint.offsetX);
+                    let newPointY = snapToGrid(pos.y + draggingControlPoint.offsetY);
+                    newPointX = snapToGrid(Math.max(0, Math.min(dimensions.width, newPointX)));
+                    newPointY = snapToGrid(Math.max(0, Math.min(dimensions.height, newPointY)));
                     const draggedPoint = { x: newPointX, y: newPointY };
                     currentPath[pointIndex] = draggedPoint;
 
-                    const fiber1 = getFiberById(conn.fiber1Id); const fiber2 = getFiberById(conn.fiber2Id);
-                    const startCable = getCableById(fiber1?.cableId); const endCable = getCableById(fiber2?.cableId);
+                    const fiber1 = getConnectionPointById(conn.fiber1Id); const fiber2 = getConnectionPointById(conn.fiber2Id);
+                    const startCable = getCableById(fiber1?.parentId); const endCable = getCableById(fiber2?.parentId);
 
                     if (pointIndex !== 0 && fiber1 && startCable) {
                         let f1Exit = { ...fiber1.exitPoint };
@@ -1188,23 +1815,23 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                         else f2Exit.y += (endCable.y < dimensions.height / 2 ? CONNECTION_VISUAL_OFFSET : -CONNECTION_VISUAL_OFFSET);
                         currentPath[currentPath.length - 1] = f2Exit;
                     }
-                    
+
                     const simplifiedPath = currentPath.reduce((acc, p, idx) => {
                         if (idx === 0 || Math.abs(p.x - acc[acc.length - 1].x) > 0.01 || Math.abs(p.y - acc[acc.length - 1].y) > 0.01) acc.push(p);
-                        else if (idx === currentPath.length -1) acc.push(p); // Keep last point
+                        else if (idx === currentPath.length - 1) acc.push(p); // Keep last point
                         return acc;
-                    }, [] as {x:number, y:number}[]);
+                    }, [] as { x: number, y: number }[]);
 
                     let finalPathForConnection = simplifiedPath;
                     if (finalPathForConnection.length === 0 && currentPath.length > 0) finalPathForConnection = [currentPath[0]];
                     if (finalPathForConnection.length === 1 && fiber1 && fiber2 && fiber1.id !== fiber2.id && currentPath.length > 1) {
                         const safePath = [currentPath[0]];
-                        if(currentPath.length > 1) safePath.push(currentPath[currentPath.length-1]);
+                        if (currentPath.length > 1) safePath.push(currentPath[currentPath.length - 1]);
                         finalPathForConnection = safePath.reduce((acc, p, idx) => {
-                             if (idx === 0 || Math.abs(p.x - acc[acc.length - 1].x) > 0.01 || Math.abs(p.y - acc[acc.length - 1].y) > 0.01) acc.push(p);
-                             return acc;
-                        }, [] as {x:number, y:number}[]);
-                        if(finalPathForConnection.length === 0) finalPathForConnection = [draggedPoint];
+                            if (idx === 0 || Math.abs(p.x - acc[acc.length - 1].x) > 0.01 || Math.abs(p.y - acc[acc.length - 1].y) > 0.01) acc.push(p);
+                            return acc;
+                        }, [] as { x: number, y: number }[]);
+                        if (finalPathForConnection.length === 0) finalPathForConnection = [draggedPoint];
                     }
 
                     return { ...conn, path: finalPathForConnection, controlPoints: finalPathForConnection.map(p_ => ({ ...p_, radius: CONNECTION_CONTROL_POINT_RADIUS })) };
@@ -1212,7 +1839,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 return conn;
             }));
         }
-    }, [draggingCableInfo, draggingControlPoint, dimensions.width, dimensions.height, calculateLayout, getFiberById, getCableById, getMousePos, editingConnectionId, generateManhattanPathWithAvoidance, connections]); // Added connections to deps for generateManhattan...
+    }, [draggingCableInfo, draggingControlPoint, dimensions.width, dimensions.height, calculateLayout, getConnectionPointById, getCableById, getMousePos, editingConnectionId, generateManhattanPathWithAvoidance, connections]); // Added connections to deps for generateManhattan...
 
     const handleMouseUp = useCallback(() => {
         if (draggingCableInfo) {
@@ -1220,22 +1847,40 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         }
         setDraggingCableInfo(null);
         setDraggingControlPoint(null);
+        setDraggingSplitterInfo(null);
+        setRotatingSplitterInfo(null);
     }, [draggingCableInfo]);
 
     // Attach mouse move and up to window to handle dragging outside canvas
     useEffect(() => {
-        if (draggingCableInfo || draggingControlPoint) {
-            window.addEventListener('mousemove', handleMouseMove as EventListener);
-            window.addEventListener('mouseup', handleMouseUp as EventListener);
+        const handleMouseMoveEvent = (e: MouseEvent) => handleMouseMove(e);
+        const handleMouseUpEvent = (e: MouseEvent) => handleMouseUp();
+
+        // Check if ANY drag or rotate operation is active
+        if (draggingCableInfo || draggingControlPoint || draggingSplitterInfo || rotatingSplitterInfo) {
+            window.addEventListener('mousemove', handleMouseMoveEvent);
+            window.addEventListener('mouseup', handleMouseUpEvent);
         } else {
-            window.removeEventListener('mousemove', handleMouseMove as EventListener);
-            window.removeEventListener('mouseup', handleMouseUp as EventListener);
+            // IMPORTANT: This else block cleans up listeners when no drag is active.
+            window.removeEventListener('mousemove', handleMouseMoveEvent);
+            window.removeEventListener('mouseup', handleMouseUpEvent);
         }
+
+        // Final cleanup when the component unmounts
         return () => {
-            window.removeEventListener('mousemove', handleMouseMove as EventListener);
-            window.removeEventListener('mouseup', handleMouseUp as EventListener);
+            window.removeEventListener('mousemove', handleMouseMoveEvent);
+            window.removeEventListener('mouseup', handleMouseUpEvent);
         };
-    }, [draggingCableInfo, draggingControlPoint, handleMouseMove, handleMouseUp]);
+    }, [
+        // The dependency array MUST include ALL of these states and handlers.
+        // This tells React to re-run this logic whenever one of them changes.
+        draggingCableInfo,
+        draggingControlPoint,
+        draggingSplitterInfo,
+        rotatingSplitterInfo,
+        handleMouseMove,
+        handleMouseUp
+    ]);
 
 
     return (
@@ -1248,7 +1893,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             // onMouseMove={handleMouseMove} // Only if not dragging window-wide
             // onMouseUp={handleMouseUp}     // Only if not dragging window-wide
             // onMouseLeave={handleMouseUp} // Still useful if not using window listeners for up
-            style={{ border: '1px solid #ccc', background: '#f0f0f0', touchAction: 'none' }}
+            style={{ border: '1px solid #ccc', background: 'rgb(216 216 216)', touchAction: 'none' }}
         />
     );
 };

@@ -74,7 +74,7 @@ export const getOpticalCableScenes = (fibers: IFiber[], cableType: "in" | "out",
             cableType: cableType,
             originalColor: fiber.color,
             isMarked: fiber.isMarked,
-            cableId: fiber.cableId,
+            cableId: fiber.parentId,
             fiberId: fiber.id,
         };
     

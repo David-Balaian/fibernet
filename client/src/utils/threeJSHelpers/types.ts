@@ -2,14 +2,14 @@ export type IFiber = {
     color: string,
     isMarked?: boolean
     id: string,
-    cableId: string,
+    parentId: string,
     tubeId?: string
 } 
 
 export type ITube = {
     color: string,
     id: string,
-    cableId: string
+    parentId: string
 }
 
 export type ICable = {
