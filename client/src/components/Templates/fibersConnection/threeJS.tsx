@@ -3,18 +3,21 @@ import React, { useRef, useEffect, useMemo, useState } from 'react';
 import { save3DConnectionsToLocalStorage } from 'src/utils/helperFunctions';
 import { ControlPointData, FiberConnection, InitialConnectionObject } from 'src/utils/threeJSHelpers/fiberConnections';
 import { getOpticalCableScenes } from 'src/utils/threeJSHelpers/OpticalCableDrawer';
-import { ICable, IFiber } from 'src/utils/threeJSHelpers/types';
+import { ICable, IFiber, ISplitter } from 'src/utils/threeJSHelpers/types';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { ConnectionManager } from 'src/utils/threeJSHelpers/ConnectionManager';
+import { createSplitter } from 'src/utils/threeJSHelpers/SplitterDrawer';
 
 interface OpticalCableProps {
-    cables: ICable[]
+    cables: ICable[];
+    objectsOnCanvas?: ISplitter[];
 }
 
-const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
+const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: splitters }) => {
     const mountRef = useRef<HTMLDivElement>(null);
     const isMounted = useRef<boolean>(false);
-    
+
     const scene = useRef(new THREE.Scene()).current;
     const camera = useRef(new THREE.PerspectiveCamera(75, 1, 0.1, 1000)).current;
     const renderer = useRef<THREE.WebGLRenderer | null>(null);
@@ -36,6 +39,8 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
     const isDraggingControlPoint = useRef(false);
 
     const [random, setRandom] = useState(Math.random());
+
+    const connectionManager = useRef(new ConnectionManager()).current;
 
     // Store more info for dragging: the control point's mesh, its connection, its index, the drag plane, and initial offset
     const selectedControlPointInfo = useRef<{
@@ -59,88 +64,68 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
      */
     const findFiberMeshByGlobalId = (
         fiberId: string,
-        currentAllFibers: THREE.Mesh[][]
+        connectableObjects: THREE.Mesh[] // CHANGE: This is now a flat array
     ): THREE.Mesh | null => {
-        if (!fiberId || !currentAllFibers) return null;
-        for (const fiberArray of currentAllFibers) {
-            for (const fiberMesh of fiberArray) {
-                if (fiberMesh.userData.fiberId === fiberId) { // Crucial check
-                    return fiberMesh;
-                }
+        if (!fiberId || !connectableObjects) return null;
+        for (const mesh of connectableObjects) {
+            if (mesh.userData.fiberId === fiberId) {
+                return mesh;
             }
         }
-        // console.warn(`Could not find fiber mesh with global ID: ${fiberId}`);
         return null;
-    };
+    }
+
 
 
     const createInitialConnections = (
         initialConnectionDefs: InitialConnectionObject[],
-        currentAllFibers: THREE.Mesh[][],
+        // CHANGE THIS PARAMETER to accept the new flat array
+        allConnectableObjects: THREE.Mesh[],
         sceneInstance: THREE.Scene
     ) => {
         if (!initialConnectionDefs || initialConnectionDefs.length === 0) {
-            // console.log("No initial connections to create.");
             return;
         }
-        if (!currentAllFibers || currentAllFibers.length === 0 || !sceneInstance) {
-            console.warn("Cannot create initial connections: fiber meshes or scene not ready.");
+        if (!allConnectableObjects || allConnectableObjects.length === 0 || !sceneInstance) {
+            console.warn("Cannot create initial connections: connectable objects or scene not ready.");
             return;
         }
 
-        // console.log(`Attempting to create ${initialConnectionDefs.length} initial connections.`);
         const newConnections: FiberConnection[] = [];
 
         initialConnectionDefs.forEach((connDef, index) => {
-            const fiber1Mesh = findFiberMeshByGlobalId(connDef.fiber1Id, currentAllFibers);
-            const fiber2Mesh = findFiberMeshByGlobalId(connDef.fiber2Id, currentAllFibers);
+            // Use the new parameter when calling findFiberMeshByGlobalId
+            const fiber1Mesh = findFiberMeshByGlobalId(connDef.fiber1Id, allConnectableObjects);
+            const fiber2Mesh = findFiberMeshByGlobalId(connDef.fiber2Id, allConnectableObjects);
 
             if (fiber1Mesh && fiber2Mesh) {
-                // Ensure they are valid THREE.Mesh instances (though findFiberMeshByGlobalId should ensure this)
-                if (!(fiber1Mesh instanceof THREE.Mesh) || !(fiber2Mesh instanceof THREE.Mesh)) {
-                    console.warn(`Objects found for initial connection ${index} are not THREE.Mesh instances.`);
-                    return; // Skip this connection definition
-                }
-
-                // The 'points' from connDef directly match ControlPointData[] for the constructor
-                const controlPointsForConstructor: ControlPointData[] = connDef.points;
-
+                // The rest of this logic correctly uses the hybrid constructor
                 const connection = new FiberConnection(
                     fiber1Mesh,
                     fiber2Mesh,
-                    controlPointsForConstructor
+                    connectionManager, // This should be available from the component's scope
+                    connDef.points
                 );
                 sceneInstance.add(connection.getMesh());
                 newConnections.push(connection);
-                // console.log(`Successfully created initial connection ${index} between ${connDef.fiber1Id} and ${connDef.fiber2Id}`);
             } else {
-                console.warn(`Failed to create initial connection ${index}: Could not find fiber meshes. Fiber1 ID: ${connDef.fiber1Id} (found: ${!!fiber1Mesh}), Fiber2 ID: ${connDef.fiber2Id} (found: ${!!fiber2Mesh})`);
+                console.warn(`Failed to create initial connection ${index}: Could not find one or both meshes. Fiber1 ID: ${connDef.fiber1Id}, Fiber2 ID: ${connDef.fiber2Id}`);
             }
         });
 
-        // Decide how to handle existing connections:
-        // Option 1: Append to existing (if any from localStorage, though order might be tricky)
-        // connections.current = [...connections.current, ...newConnections];
-
-        // Option 2: Replace existing connections with these initial ones (simpler if these are defaults)
-        // First, dispose and remove any existing connections if replacing everything
         connections.current.forEach(existingConn => {
             sceneInstance.remove(existingConn.getMesh());
             existingConn.dispose();
         });
         connections.current = newConnections;
-
-
-        // console.log(`Total initial connections created: ${newConnections.length}`);
-        // After creating these, you might want to save them to localStorage if that's still desired
-        // saveConnections(); // If you want these initial connections to overwrite localStorage
     };
 
 
 
+
     useEffect(() => {
-        if(connections.current.length)
-        save3DConnectionsToLocalStorage(connections.current)
+        if (connections.current.length)
+            save3DConnectionsToLocalStorage(connections.current)
     }, [connections.current, random]);
 
 
@@ -221,12 +206,13 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
     //     interactivityObjects: outCableInteractivity
     // } = useMemo(() => getOpticalCableScenes(fibers, "out"), [fibers]);
     const {
-        allFibers,
-        allInteractiveObjects,
         allCables,
-        allCableGroups
+        allFibers,
+        allCableGroups,
+        allSplitterGroups,
+        allConnectables,
     } = useMemo(() => {
-        const allFibers: ReturnType<typeof getOpticalCableScenes>["fibersScene"][] = []
+        const allFibersArrays: ReturnType<typeof getOpticalCableScenes>["fibersScene"][] = []
         const allCables: ReturnType<typeof getOpticalCableScenes>["mainCableScene"][] = []
         const allInteractiveObjects: ReturnType<typeof getOpticalCableScenes>["interactivityObjects"][] = []
         const allCableGroups: ReturnType<typeof getOpticalCableScenes>["cableGroup"][] = []
@@ -239,7 +225,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
                 fibersScene,
                 interactivityObjects
             } = getOpticalCableScenes(cable.fibers, cable.type, cable.type === "in" ? inCableIndex : outCableIndex, cable.id);
-            allFibers.push(fibersScene)
+            allFibersArrays.push(fibersScene)
             allCables.push(mainCableScene)
             allCableGroups.push(cableGroup)
             allInteractiveObjects.push(interactivityObjects)
@@ -250,40 +236,54 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
             }
         })
 
+        // ADD THIS NEW SECTION for processing splitters
+        const allSplitterGroups: THREE.Group[] = [];
+        const allSplitterPorts: THREE.Mesh[] = [];
+        if (splitters) {
+            splitters.forEach((splitterData, index) => {
+                const zPos = index * 5; // Stack splitters along the Z-axis
+                const { splitterGroup, portMeshes } = createSplitter(splitterData, zPos);
+                allSplitterGroups.push(splitterGroup);
+                allSplitterPorts.push(...portMeshes);
+            });
+        }
+
+        // Flatten the fibers array and combine with splitter ports
+        const allFlatFibers = allFibersArrays.flat();
+        const allConnectables = [...allFlatFibers, ...allSplitterPorts];
+
         return {
-            allFibers,
-            allCables,
-            allInteractiveObjects,
+            allFibers: allFibersArrays,
+            allCables, // You may not need this, but keep for consistency
             allCableGroups,
+            allSplitterGroups,
+            allConnectables, // This is the most important new array
         }
-    }, [cables])
+    }, [cables, splitters])
 
 
-    
-    useEffect(()=>{
+
+    useEffect(() => {
         const initialConnections = localStorage.getItem("connections3D");
-        console.log(initialConnections);
-        
-        if(initialConnections && allFibers.length && scene) {
-            console.log(allFibers);
-            
+
+        // CHANGE this check to use allConnectables
+        if (initialConnections && allConnectables.length && scene) {
             const parsedConnections: InitialConnectionObject[] = JSON.parse(initialConnections);
-            console.log("Parsed initial connections from localStorage:", parsedConnections);
-            createInitialConnections(parsedConnections, allFibers, scene);
+            // CHANGE the second argument here
+            createInitialConnections(parsedConnections, allConnectables, scene);
         }
-    }, [allFibers, scene]);
+    }, [allConnectables, scene]);
 
     useEffect(() => {
         if (!mountRef.current) return;
 
         // ... (originalMaterials setup - keep as is) ...
-        allFibers.forEach(fibersArray => {
-            fibersArray.forEach((fiber) => {
-                if (!originalMaterials.has(fiber)) {
-                    originalMaterials.set(fiber, (fiber as THREE.Mesh).material);
-                }
-            });
+        allConnectables.forEach((fiber) => {
+            if (!originalMaterials.has(fiber)) {
+                originalMaterials.set(fiber, (fiber as THREE.Mesh).material);
+            }
         });
+
 
         const currentMountRef = mountRef.current;
 
@@ -331,18 +331,22 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
             // 2. Check for Cable Group Intersection (for dragging whole cables)
             // ... (your existing cable dragging mousedown logic - ensure it doesn't run if a CP was hit)
             // (Make sure this part is largely the same as your working version)
-            const cableIntersects = raycaster.intersectObjects(allCableGroups, true);
+            const draggableObjects = [...allCableGroups, ...allSplitterGroups];
+            const cableIntersects = raycaster.intersectObjects(draggableObjects, true);
+
             if (cableIntersects.length > 0) {
                 let intersectedObject = cableIntersects[0].object;
                 let cableGroupToDrag = null;
                 let tempObj: THREE.Object3D | null = intersectedObject;
-                while (tempObj && tempObj !== scene) { // Ensure tempObj is not null before accessing parent
-                    if (allCableGroups.includes(tempObj as THREE.Group)) {
+                while (tempObj && tempObj !== scene) {
+                    // CHANGE this check to use draggableObjects array
+                    if (draggableObjects.includes(tempObj as THREE.Group)) {
                         cableGroupToDrag = tempObj as THREE.Group;
                         break;
                     }
                     tempObj = tempObj.parent;
                 }
+
 
                 if (cableGroupToDrag && !intersectedObject.userData.isFiber && !intersectedObject.userData.isControlPoint) {
                     controls.current!.enabled = false;
@@ -443,9 +447,11 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
             // B. Raycast for new hover targets
             // We check control points first, then all parts of cable groups (which includes fibers and sheaths)
             const hoverableObjects: THREE.Object3D[] = [
-                ...controlPointHelpers.current, // Give CPs higher priority in the list if order matters to intersectObjects for identical distance
-                ...allCableGroups
+                ...controlPointHelpers.current,
+                ...allCableGroups,
+                ...allSplitterGroups, // ADD THIS
             ];
+
             const intersects = raycaster.intersectObjects(hoverableObjects, true); // true for recursive
 
             // C. Process the closest hit for hover effects
@@ -619,7 +625,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
 
             // 3. Check Cable Groups (this will include fibers and cable sheaths)
             // The raycaster sorts by distance, so the first element is the closest.
-            const cableAndFiberIntersects = raycaster.intersectObjects(allCableGroups, true); // true for recursive
+            const cableAndFiberIntersects = raycaster.intersectObjects([...allCableGroups, ...allSplitterGroups], true);
 
             if (cableAndFiberIntersects.length > 0) {
                 const firstHitObject = cableAndFiberIntersects[0].object;
@@ -653,7 +659,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
                         const firstFiberOriginalMaterial = originalMaterials.get(fiber1) || fiber1.material;
                         (fiber1 as THREE.Mesh).material = firstFiberOriginalMaterial;
 
-                        const newConnection = new FiberConnection(fiber1, fiber2);
+                        const newConnection = new FiberConnection(fiber1, fiber2, connectionManager, undefined);
                         scene.add(newConnection.getMesh());
                         connections.current = [...connections.current, newConnection];
                         setSelectedFibers([]); // Reset for next connection
@@ -713,7 +719,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
             // clearControlPointHelpers();
         };
 
-    }, [camera, allCableGroups, allFibers, connections, editingConnection, selectedFibers, originalMaterials, controls, raycaster, mouse]); // Add relevant dependencies
+    }, [camera, allCableGroups, allSplitterGroups, allConnectables, editingConnection, selectedFibers, originalMaterials, controls, raycaster, mouse]); // ADD allSplitterGroups and allConnectables here
 
     // expanded
 
@@ -778,7 +784,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
 
         // Add cables to scene
         allCableGroups.forEach(cable => scene.add(cable));
-
+        allSplitterGroups.forEach(splitter => scene.add(splitter))
         // Add coordinate axes helper
         // Create AxesHelper
         const axesHelper = new THREE.AxesHelper(5);
@@ -841,10 +847,11 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
             controls.current?.removeEventListener('change', () => { });
             controls.current?.dispose();
             allCableGroups.forEach(cable => scene.remove(cable));
+            allSplitterGroups.forEach(splitter => scene.remove(splitter));
             mountRef.current?.removeChild(rendererInstance.domElement);
             rendererInstance.dispose();
         };
-    }, [allCables, allFibers, allCableGroups]);
+    }, [allCableGroups, allFibers, allSplitterGroups]);
 
     return (
         <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
@@ -899,12 +906,12 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables }) => {
 };
 
 
-const OpticalCableVisualizer: React.FC<{ cables: ICable[] }> = ({ cables }) => {
+const OpticalCableVisualizer: React.FC<{ cables: ICable[], objectsOnCanvas: ISplitter[] }> = ({ cables, objectsOnCanvas }) => {
 
     return (
         <div>
             <div style={{ margin: '0 auto' }}>
-                <OpticalCable cables={cables} />
+                <OpticalCable cables={cables} objectsOnCanvas={objectsOnCanvas} />
             </div>
         </div>
     );

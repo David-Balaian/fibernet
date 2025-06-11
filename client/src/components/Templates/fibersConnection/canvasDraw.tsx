@@ -108,21 +108,24 @@ interface SplitterState extends Splitter {
     isRotating?: boolean;
 }
 
+
+
+
 // --- Constants ---
 const CABLE_THICKNESS = 50;
 const FIBER_DIMENSION_PARALLEL = 20;    // Width for fibers in vertical cable, Height for fibers in horizontal cable
-const FIBER_DIMENSION_PERPENDICULAR = 8; // Height for fibers in vertical cable, Width for fibers in horizontal cable
-const FIBER_SPACING = 2; // Gap between fibers within a tube, or directly in cable if no tubes
+const FIBER_DIMENSION_PERPENDICULAR = 10; // 10 ///////// // Height for fibers in vertical cable, Width for fibers in horizontal cable
+const FIBER_SPACING = 5; // 5 ///////// // Gap between fibers within a tube, or directly in cable if no tubes
 const TUBE_PADDING = 10; // Padding inside the cable body around the tubes area
 const TUBE_SPACING = 5; // Vertical gap between tubes inside a cable
-const DRAG_HANDLE_RADIUS = 5;
-const DRAG_HANDLE_OFFSET = 8;
+const DRAG_HANDLE_RADIUS = 2;
+const DRAG_HANDLE_OFFSET = 10;
 const CANVAS_PADDING = 20; // Increased for better edge visibility
 const PRESPLICE_PLUS_SIZE = 24;
-const CONNECTION_CONTROL_POINT_RADIUS = 4;
+const CONNECTION_CONTROL_POINT_RADIUS = 2;
 const DELETE_ICON_SIZE = 16;
 const EDGE_TRANSFORM_THRESHOLD = 30;
-const CONNECTION_LINE_WIDTH = 3;
+const CONNECTION_LINE_WIDTH = 3; // 6 ////
 const LINE_THICKNESS_FOR_COLLISION = 1;
 const BEND_PENALTY = 30;
 const PROXIMITY_PENALTY = 60;
@@ -136,20 +139,20 @@ const CABLE_INTERSECTION_PENALTY = 400000;
 const SPLITTER_INTERSECTION_PENALTY = 450000000;
 const CENTRAL_CHANNEL_TOLERANCE = 20;
 const CENTRAL_CHANNEL_REWARD = (2 * BEND_PENALTY) + 10;
-const MIDPOINT_ADD_HANDLE_RADIUS = 4;
+const MIDPOINT_ADD_HANDLE_RADIUS = 1.5;
 const MIDPOINT_ADD_HANDLE_COLOR = 'rgba(0, 180, 0, 0.8)';
 const CONNECTION_VISUAL_OFFSET = 5; // Offset for connection lines to avoid fiber rectangles
 const dx = 26; // Offset for delete icon
 const dy = 8;  // Offset for delete icon
 
 const SPLITTER_WIDTH = 40;
-const SPLITTER_PADDING = 10;
+const SPLITTER_PADDING = FIBER_SPACING;
 const SPLITTER_PORT_DIMENSION = FIBER_DIMENSION_PERPENDICULAR; // The size of the input/output squares
 const SPLITTER_PORT_SPACING = FIBER_SPACING;
 const ROTATE_ICON_SIZE = 8;
 const ROTATE_HANDLE_OFFSET = -10;
 
-const GRID_GAP = 10;
+const GRID_GAP = 5;
 
 const snapToGrid = (value: number): number => {
     return Math.round(value / GRID_GAP) * GRID_GAP;
@@ -159,8 +162,8 @@ const snapToGrid = (value: number): number => {
 const drawGrid = (ctx: CanvasRenderingContext2D, width: number, height: number, gap: number) => {
     ctx.save(); // Save the current context state (good practice)
 
-    ctx.strokeStyle = 'rgb(5, 5, 5)'; // A light, non-intrusive grey for the grid
-    ctx.lineWidth = 0.1;
+    ctx.strokeStyle = 'rgb(156, 156, 156)'; // A light, non-intrusive grey for the grid
+    ctx.lineWidth = 0.3;
     ctx.beginPath();
 
     // Draw vertical lines
@@ -276,8 +279,8 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
         return splitters.map(splitter => {
             // First, calculate height and basic properties
             const numPorts = Math.max(splitter.inputs.length, splitter.outputs.length);
-            const contentHeight = (numPorts * SPLITTER_PORT_DIMENSION) + Math.max(0, numPorts - 1) * SPLITTER_PORT_SPACING;
-            const splitterHeight = contentHeight + (2 * SPLITTER_PADDING);
+            const contentHeight = ((numPorts * SPLITTER_PORT_DIMENSION) + Math.max(0, numPorts - 1) * SPLITTER_PORT_SPACING);
+            const splitterHeight = (contentHeight + (2 * SPLITTER_PADDING));
 
             const { x: centerX, y: centerY, rotation } = splitter;
 
@@ -298,12 +301,12 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 const baseX = centerX - SPLITTER_WIDTH / 2;
 
                 const portRect = {
-                    x: baseX - SPLITTER_PORT_DIMENSION, // The corner of the port's rect
-                    y: baseY
+                    x: (baseX - SPLITTER_PORT_DIMENSION), // The corner of the port's rect
+                    y: (baseY)
                 };
                 const exitPoint = {
-                    x: portRect.x, // Exit from the outer edge
-                    y: portRect.y + SPLITTER_PORT_DIMENSION / 2
+                    x: (portRect.x), // Exit from the outer edge
+                    y: (portRect.y + SPLITTER_PORT_DIMENSION / 2)
                 };
 
                 return {
@@ -333,7 +336,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                     type: 'out',
                     parentId: splitter.id,
                     originalColor: output.color || 'grey',
-                    rect: { ...getRotatedPoint(portRect), width: SPLITTER_PORT_DIMENSION, height: SPLITTER_PORT_DIMENSION },
+                    rect: { ...getRotatedPoint(portRect), width: FIBER_DIMENSION_PARALLEL, height: FIBER_DIMENSION_PERPENDICULAR },
                     exitPoint: getRotatedPoint(exitPoint),
                 };
             });
@@ -345,7 +348,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 inputs: newInputs,
                 outputs: newOutputs,
                 // Handles should not rotate with the body
-                dragHandle: { x: centerX, y: centerY - splitterHeight / 2 - DRAG_HANDLE_OFFSET, radius: DRAG_HANDLE_RADIUS },
+                dragHandle: { x: snapToGrid(centerX - SPLITTER_WIDTH / 2), y: snapToGrid(centerY - snapToGrid(splitterHeight / 2)), radius: DRAG_HANDLE_RADIUS },
                 rotateHandle: { x: centerX + SPLITTER_WIDTH / 2 + ROTATE_HANDLE_OFFSET, y: centerY - splitterHeight / 2, width: ROTATE_ICON_SIZE, height: ROTATE_ICON_SIZE }
             };
         });
@@ -450,8 +453,8 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                             exitPoint: { x: fiberExitX, y: fiberExitY },
                         };
                     }));
-                    cableViewHeight = (currentCable.fibers.length * (FIBER_DIMENSION_PERPENDICULAR + FIBER_SPACING)) -
-                        FIBER_SPACING + (2 * FIBER_SPACING); // Outer spacing for fibers
+                    cableViewHeight = snapToGrid((currentCable.fibers.length * (FIBER_DIMENSION_PERPENDICULAR + FIBER_SPACING)) -
+                        FIBER_SPACING + (2 * FIBER_SPACING)); // Outer spacing for fibers
                 }
             } else { // Horizontal Cable
                 cableViewHeight = CABLE_THICKNESS;
@@ -515,7 +518,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             x: dimensions.width / 2, // Default position
             y: (dimensions.height / 3) + (index * 150), // Stagger them vertically
             width: SPLITTER_WIDTH,
-            height: 100, // Initial estimate, will be recalculated
+            height: 0, // Initial estimate, will be recalculated
             rotation: 0,
             // Temporarily initialize with empty arrays; layout function will populate them
             inputs: s_input.inputs.map(i => ({ ...i })) as any,
@@ -1205,11 +1208,11 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             if (intersectsOtherFibers) cost += FIBER_INTERSECTION_PENALTY;
             if (intersectsOtherCables) cost += CABLE_INTERSECTION_PENALTY;
             if (usesCentralChannel) cost -= CENTRAL_CHANNEL_REWARD;
-            if (intersectsSplitters) cost += SPLITTER_INTERSECTION_PENALTY;
+            // if (intersectsSplitters) cost += SPLITTER_INTERSECTION_PENALTY;
 
             candidatePathsStorage.push({
                 path: cleanedPath, length: pathLength, bends: bends,
-                crossings: crossings, // <-- ADD THIS
+                crossings: crossings, 
                 isClose: tooCloseToConnection, hardCollides: hardCollisionWithConnection, cost: cost
             });
 
@@ -1343,7 +1346,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             // Check Drag Handle
             const distDrag = Math.sqrt((pos.x - splitter.dragHandle.x) ** 2 + (pos.y - splitter.dragHandle.y) ** 2);
             if (distDrag <= splitter.dragHandle.radius + 2) {
-                setDraggingSplitterInfo({ id: splitter.id, offsetX: splitter.x - pos.x, offsetY: splitter.y - pos.y });
+                setDraggingSplitterInfo({ id: splitter.id, offsetX: snapToGrid(splitter.x - pos.x), offsetY: snapToGrid(splitter.y - pos.y) });
                 // Set active state for immediate visual feedback
                 setManagedSplitters(prev => prev.map(s => s.id === splitter.id ? { ...s, dragHandle: { ...s.dragHandle, isActive: true } } : s));
                 return;
@@ -1666,7 +1669,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 const newSplitters = prevSplitters.map(s => {
                     if (s.id === draggingSplitterInfo.id) {
                         movedSplitterId = s.id;
-                        return { ...s, x: snapToGrid(pos.x + draggingSplitterInfo.offsetX), y: snapToGrid(pos.y + draggingSplitterInfo.offsetY) };
+                        return { ...s, x: snapToGrid(pos.x) + draggingSplitterInfo.offsetX, y: snapToGrid(pos.y) - 2.5 + draggingSplitterInfo.offsetY };
                     }
                     return s;
                 });

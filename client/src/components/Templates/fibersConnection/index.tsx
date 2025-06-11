@@ -10,7 +10,7 @@ import { Splitter } from "src/utils/types";
 
 const App = () => {
 
-    const [visualization, setVisualization] = useState<"2D" | "3D">("2D")
+    const [visualization, setVisualization] = useState<"2D" | "3D">("3D")
 
     const cable1ID = v4();
     const cable2ID = v4();
@@ -166,7 +166,7 @@ const App = () => {
                 <button onClick={() => { setVisualization('3D') }}>3D</button>
             </span>
             <div style={{ margin: '0 auto', width: '100vw', height: '100vh' }}>
-                {visualization === "2D" ? <FiberCanvas initialCables={cables} objectsOnCanvas={[...splitters, ...commutators]} /> : <OpticalCableVisualizer cables={cables} />}
+                {visualization === "2D" ? <FiberCanvas initialCables={cables} objectsOnCanvas={[...splitters, ...commutators]} /> : <OpticalCableVisualizer objectsOnCanvas={[...splitters, ...commutators]}  cables={cables} />}
             </div>
         </div>
     )

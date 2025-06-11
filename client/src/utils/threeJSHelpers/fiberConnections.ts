@@ -1,6 +1,7 @@
 // src/utils/threeJSHelpers/fiberConnections.ts
 import * as THREE from 'three';
 import { FIBER_HEIGHT } from './OpticalCableDrawer'; // Your existing import
+import { ConnectionManager } from './ConnectionManager';
 export type ControlPointData = { x: number; y: number; z: number };
 
 export type InitialConnectionObject = {
@@ -22,27 +23,47 @@ export class FiberConnection {
 
   // Store the 4 intermediate control points as class members
   private controlPoints: THREE.Vector3[];
+  private slotIndex: number | undefined;
+  private connectionManager: ConnectionManager;
 
-  constructor(fiber1: THREE.Mesh, fiber2: THREE.Mesh, controlPointsForConstructor?: ControlPointData[]) {
+
+
+  constructor(fiber1: THREE.Mesh, fiber2: THREE.Mesh, connectionManager: ConnectionManager, controlPointsForConstructor?: ControlPointData[]) {
     this.fiber1 = fiber1;
     this.fiber2 = fiber2;
     this.controlPointsForConstructor = controlPointsForConstructor
+    this.connectionManager = connectionManager;
+
     // Initialize control points based on initial fiber positions
     this.controlPoints = this.calculateInitialControlPoints();
 
     this.mesh = new THREE.Group(); // Create the main group first
     this.mesh.userData = { isConnection: true, connectionInstance: this };
+    if (controlPointsForConstructor && controlPointsForConstructor.length > 0) {
+      // CASE 1: This connection has saved points. Use them directly.
+      console.log("Creating connection from saved points.");
+      this.controlPoints = controlPointsForConstructor.map(p => new THREE.Vector3(p.x, p.y, p.z));
+      this.slotIndex = -1; // Mark as manually placed (unmanaged)
+    } else {
+      // CASE 2: This is a brand new connection. Acquire a slot.
+      console.log("Creating new connection with slotting.");
+      this.slotIndex = this.connectionManager.acquireSlot();
+      this.controlPoints = this.calculateInitialControlPoints();
+    }
+
+
     this.rebuildConnectionMesh(); // Call a method that populates this.mesh
   }
 
   private calculateInitialControlPoints(): THREE.Vector3[] {
-    if(this.controlPointsForConstructor){
-      return this.controlPointsForConstructor.map(item=>new THREE.Vector3(item.x, item.y, item.z))
-    }
+
     const fiber1WorldPos = new THREE.Vector3();
-    const fiber2WorldPos = new THREE.Vector3();
     this.fiber1.getWorldPosition(fiber1WorldPos);
+    const fiber2WorldPos = new THREE.Vector3();
     this.fiber2.getWorldPosition(fiber2WorldPos);
+
+    // Determine the Y-level for this connection's path from the manager
+    const yLevel = this.connectionManager.getOffsetY(this.slotIndex || 0);
 
     const tubeAnchorStart = fiber1WorldPos.clone();
     tubeAnchorStart.x += this.fiber1.userData.cableType === 'in' ? (FIBER_HEIGHT / 2) - 0.1 : -(FIBER_HEIGHT / 2) + 0.1;
@@ -50,23 +71,31 @@ export class FiberConnection {
     const tubeAnchorEnd = fiber2WorldPos.clone();
     tubeAnchorEnd.x += this.fiber2.userData.cableType === 'in' ? (FIBER_HEIGHT / 2) - 0.1 : -(FIBER_HEIGHT / 2) + 0.1;
 
+    // The first control point, lifted immediately to the connection's Y-level
     const midStartPoint = tubeAnchorStart.clone().add(
-      new THREE.Vector3(this.fiber1.userData.cableType === 'in' ? 0.5 : -0.5, 0, 0)
+      new THREE.Vector3(this.fiber1.userData.cableType === 'in' ? 1.5 : -1.5, 0, 0)
     );
+    midStartPoint.y = yLevel;
+
+    // The last control point, also at the connection's Y-level
+    const midEndPoint = tubeAnchorEnd.clone().add(
+      new THREE.Vector3(this.fiber2.userData.cableType === 'in' ? 1.5 : -1.5, 0, 0)
+    );
+    midEndPoint.y = yLevel;
+
+    // Intermediate points to guide the path across the Z-axis, maintaining the Y-level
     const midPoint1 = new THREE.Vector3(
       (tubeAnchorStart.x + tubeAnchorEnd.x) / 2,
-      fiber1WorldPos.y,
-      (tubeAnchorStart.z + tubeAnchorEnd.z) / 2
+      yLevel,
+      tubeAnchorStart.z // Z-position closer to the start fiber
     );
     const midPoint2 = new THREE.Vector3(
       (tubeAnchorStart.x + tubeAnchorEnd.x) / 2,
-      fiber2WorldPos.y,
-      (tubeAnchorStart.z + tubeAnchorEnd.z) / 2
+      yLevel,
+      tubeAnchorEnd.z // Z-position closer to the end fiber
     );
-    const midEndPoint = tubeAnchorEnd.clone().add(
-      new THREE.Vector3(this.fiber2.userData.cableType === 'in' ? 0.5 : -0.5, 0, 0)
-    );
-    return [midStartPoint.clone(), midPoint1.clone(), midPoint2.clone(), midEndPoint.clone()];
+
+    return [midStartPoint, midPoint1, midPoint2, midEndPoint];
   }
 
 
@@ -210,19 +239,31 @@ export class FiberConnection {
    */
   public setControlPointWorld(index: number, position: THREE.Vector3): void {
     if (index >= 0 && index < this.controlPoints.length) {
+      // CASE 3: A point is dragged. The connection is now "manual".
+      if (this.slotIndex !== undefined && this.slotIndex >= 0) {
+        console.log(`Connection releasing slot ${this.slotIndex} due to manual modification.`);
+        this.connectionManager.releaseSlot(this.slotIndex);
+        this.slotIndex = -1; // Mark as unmanaged
+      }
+
       if (position && position instanceof THREE.Vector3) {
         this.controlPoints[index].copy(position);
-        this.update(); // Rebuild the mesh with the new control point position
+        this.update();
       } else {
-        console.error("FiberConnection: Invalid position provided to setControlPointWorld.", position);
+        console.error("Invalid position provided to setControlPointWorld.", position);
       }
     } else {
-      console.warn(`FiberConnection: Control point index ${index} is out of bounds (0-${this.controlPoints.length - 1} allowed).`);
+      console.warn(`Control point index ${index} is out of bounds.`);
     }
   }
 
+
   public dispose(): void {
     console.log('[FiberConnection] Disposing connection:', this);
+    if (this.slotIndex !== undefined && this.slotIndex >= 0) {
+      console.log(`Connection disposed, releasing slot ${this.slotIndex}.`);
+      this.connectionManager.releaseSlot(this.slotIndex);
+    }
     // The rebuildConnectionMesh already has logic to clear children and dispose their resources.
     // We just need to ensure all children are removed and disposed.
     while (this.mesh.children.length > 0) {

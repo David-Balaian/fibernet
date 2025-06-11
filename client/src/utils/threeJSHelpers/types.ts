@@ -18,3 +18,16 @@ export type ICable = {
     id: string,
     tubes?: ITube[]
 }
+
+export type ISplitterPort = {
+    id: string;
+    parentId: string; // The ID of the splitter it belongs to
+    color?: string;
+};
+
+export type ISplitter = {
+    name: string;
+    id: string;
+    inputs: ISplitterPort[];
+    outputs: ISplitterPort[];
+};
