@@ -17,6 +17,7 @@ const App = () => {
     const cable3ID = v4();
     const cable4ID = v4();
     const cable5ID = v4();
+    const largeTubeId = "54"
     const cables: ICable[] = [
         {
             id: cable1ID,
@@ -92,10 +93,17 @@ const App = () => {
                 { color: "rgb(255, 0, 0)", id: "56", parentId: cable5ID },
             ],
             fibers: [
-                { color: "rgb(0, 0, 255)", id: "43", parentId: cable5ID, tubeId: "53" },
+                { color: "rgb(0, 0, 255)", id: "43", parentId: cable5ID, tubeId: "54" },
                 { color: "rgb(255, 165, 0)", id: "44", parentId: cable5ID, tubeId: "54" },
                 { color: "rgb(0, 128, 0)", id: "45", parentId: cable5ID, tubeId: "54" },
-                { color: "rgb(255, 0, 0)", id: "46", parentId: cable5ID, tubeId: "53" },
+                { color: "rgb(255, 0, 0)", id: "46", parentId: cable5ID, tubeId: "54" },
+                { color: "rgb(0, 0, 255)", id: "17", parentId: cable5ID, tubeId: "53"  },
+                { color: "rgb(255, 165, 0)", id: "18", parentId: cable5ID, tubeId: "53"  },
+                { color: "rgb(0, 128, 0)", id: "19", parentId: cable5ID, tubeId: "53"  },
+                { color: "rgb(165, 42, 42)", id: "20", parentId: cable5ID, tubeId: "53"  },
+                { color: "rgb(128, 128, 128)", id: "21", parentId: cable5ID, tubeId: "53"  },
+                { color: "rgb(255, 255, 255)", id: "22", parentId: cable5ID, tubeId: "53"  },
+                { color: "rgb(255, 0, 0)", id: "23", parentId: cable5ID, tubeId: "53"  },
             ]
         },
     ]

@@ -118,11 +118,18 @@ const FIBER_DIMENSION_PERPENDICULAR = 10; // 10 ///////// // Height for fibers i
 const FIBER_SPACING = 5; // 5 ///////// // Gap between fibers within a tube, or directly in cable if no tubes
 const TUBE_PADDING = 10; // Padding inside the cable body around the tubes area
 const TUBE_SPACING = 5; // Vertical gap between tubes inside a cable
-const DRAG_HANDLE_RADIUS = 2;
-const DRAG_HANDLE_OFFSET = 10;
 const CANVAS_PADDING = 20; // Increased for better edge visibility
+
+
+const DRAG_HANDLE_RADIUS = 4;
+const DRAG_HANDLE_OFFSET = 10;
 const PRESPLICE_PLUS_SIZE = 24;
-const CONNECTION_CONTROL_POINT_RADIUS = 2;
+const CONNECTION_CONTROL_POINT_RADIUS = 4;
+const MIDPOINT_ADD_HANDLE_RADIUS = 3;
+const MIDPOINT_ADD_HANDLE_COLOR = 'rgba(51, 155, 51, 0.8)';
+const ROTATE_ICON_SIZE = 8;
+const ROTATE_HANDLE_OFFSET = -10;
+
 const DELETE_ICON_SIZE = 16;
 const EDGE_TRANSFORM_THRESHOLD = 30;
 const CONNECTION_LINE_WIDTH = 3; // 6 ////
@@ -136,11 +143,8 @@ const FIBER_AVOIDANCE_MARGIN = 8;
 const FIBER_INTERSECTION_PENALTY = 500000;
 const CABLE_AVOIDANCE_MARGIN = 4;
 const CABLE_INTERSECTION_PENALTY = 400000;
-const SPLITTER_INTERSECTION_PENALTY = 450000000;
 const CENTRAL_CHANNEL_TOLERANCE = 20;
 const CENTRAL_CHANNEL_REWARD = (2 * BEND_PENALTY) + 10;
-const MIDPOINT_ADD_HANDLE_RADIUS = 1.5;
-const MIDPOINT_ADD_HANDLE_COLOR = 'rgba(0, 180, 0, 0.8)';
 const CONNECTION_VISUAL_OFFSET = 5; // Offset for connection lines to avoid fiber rectangles
 const dx = 26; // Offset for delete icon
 const dy = 8;  // Offset for delete icon
@@ -149,8 +153,7 @@ const SPLITTER_WIDTH = 40;
 const SPLITTER_PADDING = FIBER_SPACING;
 const SPLITTER_PORT_DIMENSION = FIBER_DIMENSION_PERPENDICULAR; // The size of the input/output squares
 const SPLITTER_PORT_SPACING = FIBER_SPACING;
-const ROTATE_ICON_SIZE = 8;
-const ROTATE_HANDLE_OFFSET = -10;
+
 
 const GRID_GAP = 5;
 
@@ -226,7 +229,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
     initialCables: initialCablesFromProps, // Renamed to avoid conflict
     objectsOnCanvas = [],
     width = window.innerWidth,
-    height = window.innerHeight,
+    height = Math.max(window.innerHeight, Math.max(initialCablesFromProps.filter(item=>item.type === 'in').length, initialCablesFromProps.filter(item=>item.type === 'out').length) * 200),
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [managedCables, setManagedCables] = useState<Cable[]>([]);
@@ -245,7 +248,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
     const [dimensions, setDimensions] = useState({ width, height });
     useEffect(() => {
         const handleResize = () => {
-            setDimensions({ width: window.innerWidth, height: window.innerHeight });
+            setDimensions({ width: window.innerWidth, height: Math.max(window.innerHeight, Math.max(initialCablesFromProps.filter(item=>item.type === 'in').length, initialCablesFromProps.filter(item=>item.type === 'out').length) * 200) });
         };
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
@@ -1679,7 +1682,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
 
             // 3. Regenerate paths for connections attached to the moved splitter
             if (movedSplitterId) {
-                // updateAttachedConnections(movedSplitterId);
+                updateAttachedConnections(movedSplitterId);
             }
             return; // Done
         }
@@ -1772,8 +1775,8 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                 // setConnections(prevConns => prevConns.map(conn => {
                 //     const fiber1 = reLayoutedCables.flatMap(ca => ca.fibers).find(f => f.id === conn.fiber1Id);
                 //     const fiber2 = reLayoutedCables.flatMap(ca => ca.fibers).find(f => f.id === conn.fiber2Id);
-                //     const cable1 = reLayoutedCables.find(ca => ca.id === fiber1?.cableId);
-                //     const cable2 = reLayoutedCables.find(ca => ca.id === fiber2?.cableId);
+                //     const cable1 = reLayoutedCables.find(ca => ca.id === fiber1?.parentId);
+                //     const cable2 = reLayoutedCables.find(ca => ca.id === fiber2?.parentId);
 
                 //     if (fiber1 && fiber2 && cable1 && cable2) {
                 //         const newPath = generateManhattanPathWithAvoidance(fiber1, fiber2, cable1, cable2, prevConns.filter(c => c.id !== conn.id), dimensions.width, dimensions.height, conn.id);
@@ -1800,7 +1803,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
                     let newPointY = snapToGrid(pos.y + draggingControlPoint.offsetY);
                     newPointX = snapToGrid(Math.max(0, Math.min(dimensions.width, newPointX)));
                     newPointY = snapToGrid(Math.max(0, Math.min(dimensions.height, newPointY)));
-                    const draggedPoint = { x: newPointX, y: newPointY };
+                    const draggedPoint = { x: e.altKey ? currentPath[pointIndex].x : newPointX, y: e.shiftKey ? currentPath[pointIndex].y : newPointY };
                     currentPath[pointIndex] = draggedPoint;
 
                     const fiber1 = getConnectionPointById(conn.fiber1Id); const fiber2 = getConnectionPointById(conn.fiber2Id);

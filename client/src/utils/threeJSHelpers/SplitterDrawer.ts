@@ -5,7 +5,7 @@ import { ISplitter } from './types';
 
 // Define constants for splitter dimensions for easy tweaking
 const SPLITTER_WIDTH = 0.1;
-const SPLITTER_HEIGHT = 2;
+// REMOVED: const SPLITTER_HEIGHT = 2; // This is now dynamic
 const SPLITTER_DEPTH = 0.3;
 const PORT_RADIUS = 0.05;
 const PORT_LENGTH = 0.2;
@@ -39,8 +39,14 @@ const createNameSprite = (text: string): THREE.Sprite => {
  * @returns An object containing the main group and an array of all its port meshes.
  */
 export const createSplitter = (splitterData: ISplitter, zPosition: number) => {
+    // ADDED: Calculate the dynamic height based on the maximum number of ports
+    const maxPorts = Math.max(splitterData.inputs.length, splitterData.outputs.length);
+    // The height is the number of ports multiplied by spacing, giving a half-space margin at top and bottom.
+    const dynamicSplitterHeight = maxPorts * PORT_SPACING;
+
     const splitterGroup = new THREE.Group();
-    splitterGroup.position.set(0, SPLITTER_HEIGHT / 2, zPosition);
+    // CHANGED: Use dynamic height for positioning
+    splitterGroup.position.set(0, dynamicSplitterHeight / 2, zPosition);
     
     // Add userData to the group for easy identification during drag operations
     splitterGroup.userData = {
@@ -49,7 +55,8 @@ export const createSplitter = (splitterData: ISplitter, zPosition: number) => {
     };
 
     // 1. Create the main box
-    const boxGeometry = new THREE.BoxGeometry(SPLITTER_WIDTH, SPLITTER_HEIGHT, SPLITTER_DEPTH);
+    // CHANGED: Use dynamic height for the box geometry
+    const boxGeometry = new THREE.BoxGeometry(SPLITTER_WIDTH, dynamicSplitterHeight, SPLITTER_DEPTH);
     const boxMaterial = new THREE.MeshStandardMaterial({
         color: 0x333344,
         metalness: 0.8,
@@ -61,13 +68,14 @@ export const createSplitter = (splitterData: ISplitter, zPosition: number) => {
 
     // 2. Create the name label
     const nameLabel = createNameSprite(splitterData.name);
-    nameLabel.position.set(0, SPLITTER_HEIGHT / 2 + 0.5, 0); // Position above the box
+    // CHANGED: Use dynamic height to position the label above the box
+    nameLabel.position.set(0, dynamicSplitterHeight / 2 + 0.5, 0); 
     splitterGroup.add(nameLabel);
 
     const allPortMeshes: THREE.Mesh[] = [];
 
     // 3. Create Input Ports (on the left, -X side)
-    const totalInputHeight = splitterData.inputs.length * PORT_SPACING;
+    const totalInputHeight = (splitterData.inputs.length - 1) * PORT_SPACING;
     splitterData.inputs.forEach((port, index) => {
         const portGeometry = new THREE.CylinderGeometry(PORT_RADIUS, PORT_RADIUS, PORT_LENGTH, 16);
         const portMaterial = new THREE.MeshPhongMaterial({ color: port.color || 0xffffff });
@@ -75,7 +83,8 @@ export const createSplitter = (splitterData: ISplitter, zPosition: number) => {
 
         // Position the port on the left face of the box
         portMesh.position.x = -SPLITTER_WIDTH / 2 - PORT_LENGTH / 2;
-        portMesh.position.y = (totalInputHeight / 2) - (index * PORT_SPACING) - (PORT_SPACING / 2);
+        // This calculation centers the block of ports vertically.
+        portMesh.position.y = (totalInputHeight / 2) - (index * PORT_SPACING);
         portMesh.rotation.z = Math.PI / 2;
 
         // CRITICAL: Set userData to mimic a fiber so connection logic works seamlessly
@@ -96,14 +105,14 @@ export const createSplitter = (splitterData: ISplitter, zPosition: number) => {
     });
 
     // 4. Create Output Ports (on the right, +X side)
-    const totalOutputHeight = splitterData.outputs.length * PORT_SPACING;
+    const totalOutputHeight = (splitterData.outputs.length - 1) * PORT_SPACING;
     splitterData.outputs.forEach((port, index) => {
         const portGeometry = new THREE.CylinderGeometry(PORT_RADIUS, PORT_RADIUS, PORT_LENGTH, 16);
         const portMaterial = new THREE.MeshPhongMaterial({ color: port.color || 0xffffff });
         const portMesh = new THREE.Mesh(portGeometry, portMaterial);
 
         portMesh.position.x = SPLITTER_WIDTH / 2 + PORT_LENGTH / 2;
-        portMesh.position.y = (totalOutputHeight / 2) - (index * PORT_SPACING) - (PORT_SPACING / 2);
+        portMesh.position.y = (totalOutputHeight / 2) - (index * PORT_SPACING);
         portMesh.rotation.z = Math.PI / 2;
 
         portMesh.userData = {

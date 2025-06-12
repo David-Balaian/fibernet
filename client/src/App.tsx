@@ -5,6 +5,8 @@ import { getAccount, getAuthStatus } from './store/user/selectors'
 import { getUserFromLS } from './utils/helperFunctions'
 import userSlice from './store/user/slice'
 import OpticalCableVisualizer from './components/Templates/fibersConnection'
+import InteractiveMap from './components/Templates/Maps/InteractiveMap'
+import { MapPoint } from './utils/types'
 
 export default function App() {
   const dispatch = useAppDispatch()
@@ -17,12 +19,20 @@ export default function App() {
     }
   }, [isLoggedIn])
 
+  const markers: MapPoint[] = [
+    { id: 1, lat: 40.1792, lng: 44.5152 }, // Yerevan Center
+    { id: 2, lat: 40.2050, lng: 44.5250 }, // Near Komitas Pantheon
+    { id: 3, lat: 40.1522, lng: 44.4852 }, // Near Erebuni Museum
+  ];
+
+
   return (
     <div className='App'>
       {/* <Header /> */}
 
       {/* {isLoggedIn ? <LoggedInText /> : <LoggedOutText />} */}
-      <OpticalCableVisualizer />
+      {/* <OpticalCableVisualizer /> */}
+      <InteractiveMap points={markers} />
     </div>
   )
 }

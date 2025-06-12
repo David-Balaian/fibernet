@@ -34,7 +34,19 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
     const [selectedFibers, setSelectedFibers] = useState<THREE.Mesh[]>([]);
     const [activeConnection, setActiveConnection] = useState<FiberConnection | null>(null);
     const [selectedControlPoint, setSelectedControlPoint] = useState<number | null>(null);
-    const dragOffset = useRef<THREE.Vector3 | null>(null);
+
+    const isRotating = useRef(false);
+
+    const rotationInfo = useRef<{
+        startX: number;
+        initialRotation: THREE.Euler;
+    } | null>(null);
+
+    const dragInfo = useRef<{
+        plane: THREE.Plane;
+        offset: THREE.Vector3;
+    } | null>(null);
+
     const [editingConnection, setEditingConnection] = useState<FiberConnection | null>(null);
     const isDraggingControlPoint = useRef(false);
 
@@ -42,7 +54,6 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
 
     const connectionManager = useRef(new ConnectionManager()).current;
 
-    // Store more info for dragging: the control point's mesh, its connection, its index, the drag plane, and initial offset
     const selectedControlPointInfo = useRef<{
         mesh: THREE.Mesh,
         connection: FiberConnection,
@@ -55,16 +66,9 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
 
     console.log(connections.current, "connections.current");
 
-    /**
-     * Finds a fiber THREE.Mesh within allFibers based on its globally unique ID.
-     * Assumes fiberMesh.userData.id contains the unique fiber ID.
-     * @param fiberId The unique ID of the fiber to find.
-     * @param currentAllFibers The array of fiber arrays (THREE.Mesh[][]).
-     * @returns The THREE.Mesh for the fiber, or null if not found.
-     */
     const findFiberMeshByGlobalId = (
         fiberId: string,
-        connectableObjects: THREE.Mesh[] // CHANGE: This is now a flat array
+        connectableObjects: THREE.Mesh[]
     ): THREE.Mesh | null => {
         if (!fiberId || !connectableObjects) return null;
         for (const mesh of connectableObjects) {
@@ -75,11 +79,8 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
         return null;
     }
 
-
-
     const createInitialConnections = (
         initialConnectionDefs: InitialConnectionObject[],
-        // CHANGE THIS PARAMETER to accept the new flat array
         allConnectableObjects: THREE.Mesh[],
         sceneInstance: THREE.Scene
     ) => {
@@ -94,16 +95,14 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
         const newConnections: FiberConnection[] = [];
 
         initialConnectionDefs.forEach((connDef, index) => {
-            // Use the new parameter when calling findFiberMeshByGlobalId
             const fiber1Mesh = findFiberMeshByGlobalId(connDef.fiber1Id, allConnectableObjects);
             const fiber2Mesh = findFiberMeshByGlobalId(connDef.fiber2Id, allConnectableObjects);
 
             if (fiber1Mesh && fiber2Mesh) {
-                // The rest of this logic correctly uses the hybrid constructor
                 const connection = new FiberConnection(
                     fiber1Mesh,
                     fiber2Mesh,
-                    connectionManager, // This should be available from the component's scope
+                    connectionManager,
                     connDef.points
                 );
                 sceneInstance.add(connection.getMesh());
@@ -120,30 +119,22 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
         connections.current = newConnections;
     };
 
-
-
-
     useEffect(() => {
         if (connections.current.length)
             save3DConnectionsToLocalStorage(connections.current)
     }, [connections.current, random]);
 
-
-
-
     const clearControlPointHelpers = () => {
         controlPointHelpers.current.forEach(helper => scene.remove(helper));
         controlPointHelpers.current = [];
         console.log("removed controlPointHelpers");
-
     };
 
     const showControlPointHelpers = (connection: FiberConnection) => {
-        clearControlPointHelpers(); // Clear any existing helpers
-        // Use the new method from FiberConnection:
+        clearControlPointHelpers();
         const editablePoints = connection.getPotentialEditablePointsWorldPositions();
 
-        editablePoints.forEach((point, index) => { // index will be 0, 1, 2, 3
+        editablePoints.forEach((point, index) => {
             const geometry = new THREE.SphereGeometry(0.07, 32, 32);
             const material = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: false });
 
@@ -151,14 +142,13 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
             helper.position.copy(point);
             helper.userData = {
                 isControlPoint: true,
-                connectionInstance: connection, // Link back to the connection
-                pointIndex: index // This will be 0, 1, 2, or 3 for the 4 points
+                connectionInstance: connection,
+                pointIndex: index
             };
             scene?.add(helper);
             controlPointHelpers.current.push(helper);
         });
     };
-
 
     const handleDeleteConnection = () => {
         if (!editingConnection) {
@@ -167,44 +157,15 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
         }
 
         console.log("[OpticalCable] Deleting connection:", editingConnection);
-
-        // 1. Remove the connection's mesh from the scene
         scene.remove(editingConnection.getMesh());
-
-        // 2. Call dispose on the FiberConnection instance
-        editingConnection.dispose(); // Make sure this method exists and works in FiberConnection.ts
-
-        // 3. Remove the connection from the connections.current array
+        editingConnection.dispose();
         connections.current = connections.current.filter(conn => conn !== editingConnection);
-
-        // 4. Clear visual helpers for control points
         clearControlPointHelpers();
-
-        // 5. Reset the editingConnection state
         setEditingConnection(null);
-
-        setSelectedFibers([]); // Clear any selected fibers
-        setSelectedFiber(null); // Clear selected fiber state
+        setSelectedFibers([]);
+        setSelectedFiber(null);
     };
 
-
-
-
-    // const [selectedCable, setSelectedCable] = useState<THREE.Object3D | null>(null);
-
-
-    // Generate cable scenes
-    // const {
-    //     mainCableScene: inCable,
-    //     fibersScene: inCableFibers,
-    //     interactivityObjects: inCableInteractivity
-    // } = useMemo(() => getOpticalCableScenes(fibers, "in"), [fibers]);
-
-    // const {
-    //     mainCableScene: outCable,
-    //     fibersScene: outCableFibers,
-    //     interactivityObjects: outCableInteractivity
-    // } = useMemo(() => getOpticalCableScenes(fibers, "out"), [fibers]);
     const {
         allCables,
         allFibers,
@@ -224,7 +185,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
                 mainCableScene,
                 fibersScene,
                 interactivityObjects
-            } = getOpticalCableScenes(cable.fibers, cable.type, cable.type === "in" ? inCableIndex : outCableIndex, cable.id);
+            } = getOpticalCableScenes(cable.fibers, cable.type, cable.type === "in" ? inCableIndex : outCableIndex, cable.id, cable.tubes);
             allFibersArrays.push(fibersScene)
             allCables.push(mainCableScene)
             allCableGroups.push(cableGroup)
@@ -236,56 +197,77 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
             }
         })
 
-        // ADD THIS NEW SECTION for processing splitters
         const allSplitterGroups: THREE.Group[] = [];
         const allSplitterPorts: THREE.Mesh[] = [];
         if (splitters) {
             splitters.forEach((splitterData, index) => {
-                const zPos = index * 5; // Stack splitters along the Z-axis
+                const zPos = index * 5;
                 const { splitterGroup, portMeshes } = createSplitter(splitterData, zPos);
                 allSplitterGroups.push(splitterGroup);
                 allSplitterPorts.push(...portMeshes);
             });
         }
 
-        // Flatten the fibers array and combine with splitter ports
         const allFlatFibers = allFibersArrays.flat();
         const allConnectables = [...allFlatFibers, ...allSplitterPorts];
 
         return {
             allFibers: allFibersArrays,
-            allCables, // You may not need this, but keep for consistency
+            allCables,
             allCableGroups,
             allSplitterGroups,
-            allConnectables, // This is the most important new array
+            allConnectables,
         }
     }, [cables, splitters])
 
-
-
     useEffect(() => {
         const initialConnections = localStorage.getItem("connections3D");
-
-        // CHANGE this check to use allConnectables
         if (initialConnections && allConnectables.length && scene) {
             const parsedConnections: InitialConnectionObject[] = JSON.parse(initialConnections);
-            // CHANGE the second argument here
             createInitialConnections(parsedConnections, allConnectables, scene);
         }
     }, [allConnectables, scene]);
 
+
+    // main useEffect for event listeners
     useEffect(() => {
         if (!mountRef.current) return;
 
-        // ... (originalMaterials setup - keep as is) ...
         allConnectables.forEach((fiber) => {
             if (!originalMaterials.has(fiber)) {
                 originalMaterials.set(fiber, (fiber as THREE.Mesh).material);
             }
         });
 
-
         const currentMountRef = mountRef.current;
+
+        const updateAttachedConnections = (transformedGroup: THREE.Object3D) => {
+            connections.current.forEach(conn => {
+                let isConnected = false;
+                let fiber1Parent = conn.fiber1.parent;
+                while (fiber1Parent && fiber1Parent !== scene) {
+                    if (fiber1Parent === transformedGroup) {
+                        isConnected = true;
+                        break;
+                    }
+                    fiber1Parent = fiber1Parent.parent;
+                }
+                if (!isConnected) {
+                    let fiber2Parent = conn.fiber2.parent;
+                    while (fiber2Parent && fiber2Parent !== scene) {
+                        if (fiber2Parent === transformedGroup) {
+                            isConnected = true;
+                            break;
+                        }
+                        fiber2Parent = fiber2Parent.parent;
+                    }
+                }
+
+                if (isConnected) {
+                    conn.update();
+                }
+            });
+        };
 
         const handleMouseDown = (event: MouseEvent) => {
             if (!currentMountRef) return;
@@ -302,19 +284,16 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
 
                 console.log('[OpticalCable] MouseDown on ControlPoint:', pointIndex);
 
-                isDragging.current = false; // Ensure not dragging cable
+                isDragging.current = false;
                 isDraggingControlPoint.current = true;
                 if (controls.current) controls.current.enabled = false;
 
-                // Create a plane perpendicular to the camera view, passing through the control point
                 const planeNormal = camera.getWorldDirection(new THREE.Vector3()).negate();
                 const dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, intersectedCPMesh.position);
 
-                // Calculate intersection point of ray with this plane
                 const intersectionPoint = new THREE.Vector3();
-                raycaster.ray.intersectPlane(dragPlane, intersectionPoint); // Populates intersectionPoint
+                raycaster.ray.intersectPlane(dragPlane, intersectionPoint);
 
-                // Calculate offset from control point's actual position to this intersection point
                 const dragOffset = new THREE.Vector3().subVectors(intersectedCPMesh.position, intersectionPoint);
 
                 selectedControlPointInfo.current = {
@@ -325,45 +304,55 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
                     dragOffset: dragOffset
                 };
                 currentMountRef.style.cursor = 'grabbing';
-                return; // Prioritize control point dragging
+                return;
             }
 
-            // 2. Check for Cable Group Intersection (for dragging whole cables)
-            // ... (your existing cable dragging mousedown logic - ensure it doesn't run if a CP was hit)
-            // (Make sure this part is largely the same as your working version)
+            // 2. Check for Cable/Splitter Group Intersection
             const draggableObjects = [...allCableGroups, ...allSplitterGroups];
-            const cableIntersects = raycaster.intersectObjects(draggableObjects, true);
+            const intersects = raycaster.intersectObjects(draggableObjects, true);
 
-            if (cableIntersects.length > 0) {
-                let intersectedObject = cableIntersects[0].object;
-                let cableGroupToDrag = null;
+            if (intersects.length > 0) {
+                let intersectedObject = intersects[0].object;
+                let groupToTransform: THREE.Group | null = null;
                 let tempObj: THREE.Object3D | null = intersectedObject;
                 while (tempObj && tempObj !== scene) {
-                    // CHANGE this check to use draggableObjects array
                     if (draggableObjects.includes(tempObj as THREE.Group)) {
-                        cableGroupToDrag = tempObj as THREE.Group;
+                        groupToTransform = tempObj as THREE.Group;
                         break;
                     }
                     tempObj = tempObj.parent;
                 }
 
-
-                if (cableGroupToDrag && !intersectedObject.userData.isFiber && !intersectedObject.userData.isControlPoint) {
+                if (groupToTransform && !intersectedObject.userData.isCable && !intersectedObject.userData.isFiber && !intersectedObject.userData.isControlPoint) {
                     controls.current!.enabled = false;
-                    isDragging.current = true;
-                    // isDraggingControlPoint.current = false; // Already false if we reached here
-                    selectedCable.current = cableGroupToDrag;
+                    selectedCable.current = groupToTransform;
 
-                    const planeZ = new THREE.Plane(new THREE.Vector3(0, 0, 1), -cableGroupToDrag.position.z);
-                    const target = new THREE.Vector3();
-                    raycaster.ray.intersectPlane(planeZ, target); // Populates target
-                    if (target) { // Check if intersection occurred
-                        dragOffset.current = new THREE.Vector3().subVectors(cableGroupToDrag.position, target);
+                    // NEW: Check for Alt key to decide between rotating and dragging
+                    if (event.altKey) {
+                        // START ROTATION
+                        isRotating.current = true;
+                        isDragging.current = false;
+                        rotationInfo.current = {
+                            startX: event.clientX,
+                            initialRotation: groupToTransform.rotation.clone()
+                        };
+                        currentMountRef.style.cursor = 'e-resize';
+
                     } else {
-                        // Fallback if ray doesn't intersect plane, though unlikely for this setup
-                        dragOffset.current = new THREE.Vector3();
+                        // START DRAGGING (TRANSLATION)
+                        isDragging.current = true;
+                        isRotating.current = false;
+                        const planeNormal = camera.getWorldDirection(new THREE.Vector3()).negate();
+                        const dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, groupToTransform.position);
+                        const intersectionPoint = new THREE.Vector3();
+                        if (raycaster.ray.intersectPlane(dragPlane, intersectionPoint)) {
+                            const offset = new THREE.Vector3().subVectors(groupToTransform.position, intersectionPoint);
+                            dragInfo.current = { plane: dragPlane, offset: offset };
+                        } else {
+                            dragInfo.current = null;
+                        }
+                        currentMountRef.style.cursor = 'grabbing';
                     }
-                    currentMountRef.style.cursor = 'grabbing';
                     return;
                 }
             }
@@ -378,9 +367,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
 
-            // 1. Active Dragging Takes Precedence (Control Point or Cable)
-            // These blocks should return early if a drag is active.
-
+            // Dragging Control Point logic (unchanged)
             if (isDraggingControlPoint.current && selectedControlPointInfo.current) {
                 const { mesh: cpMesh, connection, pointIndex, dragPlane, dragOffset } = selectedControlPointInfo.current;
                 const targetPositionForCP = new THREE.Vector3();
@@ -391,214 +378,145 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
                 }
                 currentMountRef.style.cursor = 'grabbing';
                 setRandom(Math.random())
-                return; // Dragging CP, no other mousemove logic needed
+                return;
             }
 
-            if (isDragging.current && selectedCable.current && dragOffset.current) {
-                const targetPositionForCable = new THREE.Vector3();
-                const cameraDirection = new THREE.Vector3();
-                camera.getWorldDirection(cameraDirection);
-                const verticalThreshold = 0.7;
-                const isTopDownView = Math.abs(cameraDirection.y) > verticalThreshold;
-                let planeIntersected = false;
+            //  Handle rotation on mouse move
+            if (isRotating.current && selectedCable.current && rotationInfo.current) {
+                const deltaX = event.clientX - rotationInfo.current.startX;
+                const rotationSpeed = 0.01; // Sensitivity of rotation
 
-                if (isTopDownView) {
-                    const xzPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -selectedCable.current.position.y);
-                    planeIntersected = !!raycaster.ray.intersectPlane(xzPlane, targetPositionForCable);
-                } else {
-                    const xyPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -selectedCable.current.position.z);
-                    planeIntersected = !!raycaster.ray.intersectPlane(xyPlane, targetPositionForCable);
-                }
+                selectedCable.current.rotation.x = rotationInfo.current.initialRotation.x + (deltaX * rotationSpeed);
 
-                if (planeIntersected) {
-                    const newX = targetPositionForCable.x + dragOffset.current.x;
-                    const newY = isTopDownView ? selectedCable.current.position.y : targetPositionForCable.y + dragOffset.current.y;
-                    const newZ = isTopDownView ? targetPositionForCable.z + dragOffset.current.z : selectedCable.current.position.z;
-                    selectedCable.current.position.set(newX, newY, newZ);
+                updateAttachedConnections(selectedCable.current);
+                return;
+            }
 
-                    connections.current.forEach(conn => {
-                        const fiber1Parent = conn.fiber1.parent;
-                        const fiber2Parent = conn.fiber2.parent;
-                        if (fiber1Parent === selectedCable.current || fiber2Parent === selectedCable.current) {
-                            conn.update();
-                        }
-                    });
+            // Handle dragging (translation)
+            if (isDragging.current && selectedCable.current && dragInfo.current) {
+                const targetPosition = new THREE.Vector3();
+                if (raycaster.ray.intersectPlane(dragInfo.current.plane, targetPosition)) {
+                    const newPosition = targetPosition.add(dragInfo.current.offset);
+                    selectedCable.current.position.copy(newPosition);
+
+                    updateAttachedConnections(selectedCable.current);
                 }
                 currentMountRef.style.cursor = 'grabbing';
-                return; // Dragging cable, no other mousemove logic needed
+                return;
             }
 
-            // 2. Hover Effects (if not dragging anything)
-
-            // A. Reset previous fiber hover effect FIRST
+            // Hover effects logic (unchanged)
+            // ... (your existing hover logic remains here) ...
             if (hoveredFiber.current) {
                 const originalMaterial = originalMaterials.get(hoveredFiber.current);
                 if (originalMaterial) {
                     (hoveredFiber.current as THREE.Mesh).material = originalMaterial;
                 }
-                // else { console.warn("Original material not found for previously hovered fiber", hoveredFiber.current.name); }
-
                 if (hoveredFiber.current.userData.originalX !== undefined) {
                     hoveredFiber.current.position.x = hoveredFiber.current.userData.originalX;
                 }
                 hoveredFiber.current = null;
             }
-
-            // B. Raycast for new hover targets
-            // We check control points first, then all parts of cable groups (which includes fibers and sheaths)
             const hoverableObjects: THREE.Object3D[] = [
                 ...controlPointHelpers.current,
                 ...allCableGroups,
-                ...allSplitterGroups, // ADD THIS
+                ...allSplitterGroups,
             ];
-
-            const intersects = raycaster.intersectObjects(hoverableObjects, true); // true for recursive
-
-            // C. Process the closest hit for hover effects
+            const intersects = raycaster.intersectObjects(hoverableObjects, true);
             if (intersects.length > 0) {
                 const firstHit = intersects[0].object;
-
-                // Is it a Control Point Helper?
                 if (controlPointHelpers.current.includes(firstHit as THREE.Mesh)) {
-                    currentMountRef.style.cursor = 'pointer'; // Or 'grab' to indicate draggability
-                    // No other visual effect for CP hover in this example, but you could add one.
-                    // Since a CP is hovered, we don't want fiber or cable sheath hover effects.
+                    currentMountRef.style.cursor = 'pointer';
                 }
-                // Is it a Fiber? (and not a CP, because CPs are checked first)
                 else if (firstHit.userData.isFiber) {
                     hoveredFiber.current = firstHit as THREE.Mesh;
-
-                    // Store original material if not already stored (important for hover effect)
                     if (!originalMaterials.has(hoveredFiber.current)) {
                         originalMaterials.set(hoveredFiber.current, (hoveredFiber.current as THREE.Mesh).material);
                     }
-                    // Store original X position for hover displacement
                     if (hoveredFiber.current.userData.originalX === undefined) {
                         hoveredFiber.current.userData.originalX = hoveredFiber.current.position.x;
                     }
-
-                    // Apply visual hover effect (e.g., slight displacement)
                     hoveredFiber.current.position.x = hoveredFiber.current.userData.originalX + (hoveredFiber.current.userData.cableType === 'in' ? 0.05 : -0.05);
-                    // Optionally, change material for hover:
-                    // (hoveredFiber.current as THREE.Mesh).material = someHoverMaterial;
-
                     currentMountRef.style.cursor = 'pointer';
                 }
-                // Is it another part of a Cable Group (e.g., sheath)? (and not a CP or Fiber)
                 else {
-                    // Check if firstHit is a descendant of any group in allCableGroups
-                    // This helps confirm it's not some other unrelated scene object if hoverableObjects included more.
                     let isCableComponent = false;
-                    for (const group of allCableGroups) {
-                        if (group.getObjectById(firstHit.id)) { // Checks if firstHit is child of this group
+                    for (const group of [...allCableGroups, ...allSplitterGroups]) {
+                        if (group.getObjectById(firstHit.id)) {
                             isCableComponent = true;
                             break;
                         }
                     }
-
                     if (isCableComponent) {
-                        // console.log("Hovering over cable sheath/part:", firstHit.name);
-                        // Set cursor for cable body hover, e.g., if the cable itself is selectable/draggable
-                        // currentMountRef.style.cursor = 'move'; // Example if cables are draggable via any part
-                        currentMountRef.style.cursor = 'default'; // Or keep default if no specific cable body hover interaction
-                        // Ensure no fiber hover effect is active (already cleared at the start of this section)
+                        currentMountRef.style.cursor = 'move';
                     } else {
-                        // Hit something else that was in hoverableObjects but not handled above
                         currentMountRef.style.cursor = 'default';
                     }
                 }
             } else {
-                // No intersections with any hoverable objects
                 currentMountRef.style.cursor = 'default';
             }
         };
 
         const handleMouseUp = () => {
-            let cursorShouldBePointer = false; // Check if mouse is still over a CP after drag
-
+            // Unchanged: End drag for Control Points
             if (isDraggingControlPoint.current) {
-                console.log('[OpticalCable] MouseUp after dragging ControlPoint');
                 isDraggingControlPoint.current = false;
-                // selectedControlPointInfo.current = null; // Keep info if we want to highlight on hover
                 if (controls.current) controls.current.enabled = true;
-
-                // Check if still hovering over a control point to set cursor correctly
-                if (selectedControlPointInfo.current?.mesh) {
-                    const cpBoundingBox = new THREE.Box3().setFromObject(selectedControlPointInfo.current.mesh);
-                    if (raycaster.ray.intersectsBox(cpBoundingBox)) { // simple check, assumes mouse didn't move for this check
-                        cursorShouldBePointer = true;
-                    }
-                }
-                selectedControlPointInfo.current = null; // Clear selection after checks
+                selectedControlPointInfo.current = null;
             }
 
+            // CHANGED: End drag for Cables/Splitters
             if (isDragging.current) {
                 isDragging.current = false;
                 if (controls.current) controls.current.enabled = true;
-                // selectedCable.current = null; // Clearing this means it can't be immediately clicked without re-mousedown
+                selectedCable.current = null;
+                // ADDED: Clear the drag info
+                dragInfo.current = null;
             }
 
+            // NEW: End rotation
+            if (isRotating.current) {
+                isRotating.current = false;
+                if (controls.current) controls.current.enabled = true;
+                rotationInfo.current = null;
+                selectedCable.current = null;
+            }
+
+            // Reset cursor based on current hover state
             if (currentMountRef) {
-                // If mouse is up, check current hover state for cursor if not dragging anymore
-                const rect = currentMountRef.getBoundingClientRect();
-                // Use last known mouse position for raycaster (or re-fetch if event is available)
-                // mouse.x, mouse.y are already set from last mousemove
-                raycaster.setFromCamera(mouse, camera); // mouse coords from last move
-
+                raycaster.setFromCamera(mouse, camera);
                 const cpIntersects = raycaster.intersectObjects(controlPointHelpers.current);
-                if (cpIntersects.length > 0 && cpIntersects[0].object.userData.isControlPoint) {
-                    cursorShouldBePointer = true;
-                }
+                const fiberIntersects = raycaster.intersectObjects(allConnectables);
 
-                currentMountRef.style.cursor = cursorShouldBePointer ? 'pointer' : 'default';
+                if (cpIntersects.length > 0) {
+                    currentMountRef.style.cursor = 'pointer';
+                } else if (fiberIntersects.length > 0 && fiberIntersects[0].object.userData.isFiber) {
+                    currentMountRef.style.cursor = 'pointer';
+                } else {
+                    currentMountRef.style.cursor = 'default';
+                }
             }
         };
 
-        // handleClick should remain largely the same as your working version for selection
-        // Just ensure it doesn't interfere with drag completion.
-        // The isDragging.current and isDraggingControlPoint.current flags should prevent
-        // click logic from firing immediately after a drag if checked at the start of handleClick.
         const handleClick = (event: MouseEvent) => {
-            // Standard check: if a drag operation was just happening, often we want to suppress a 'click'.
-            // The mouseup handlers should set isDragging flags to false.
-            // This check is a safeguard or for more nuanced drag-click distinction if needed.
+            // ... (Your existing handleClick logic remains unchanged)
             if (!currentMountRef || isDragging.current || isDraggingControlPoint.current) {
-                // console.log("[OpticalCable] Click suppressed due to active drag operation.");
                 return;
             }
-            // console.log('[OpticalCable] handleClick triggered');
-
             const rect = currentMountRef.getBoundingClientRect();
             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
 
-            // Order of precedence for clicks:
-            // 1. Control Point Helpers (most specific UI element)
-            // 2. Connection Tubes (visual representation of established connections)
-            // 3. Cable Groups (which include fibers and cable sheaths - closest part first)
-            // 4. Empty space
-
-            // 1. Check Control Points
             const cpIntersects = raycaster.intersectObjects(controlPointHelpers.current);
             if (cpIntersects.length > 0) {
-                // console.log("[OpticalCable] Clicked on a control point helper.");
-                // Typically, mousedown on a CP initiates drag, click might do nothing or select its connection.
-                // For now, if a CP is clicked, we consume the event and do nothing else here.
-                // You could add logic here to select the CP's associated connection if desired:
-                // const { connectionInstance } = cpIntersects[0].object.userData;
-                // if (editingConnection !== connectionInstance) {
-                //     setEditingConnection(connectionInstance);
-                //     showControlPointHelpers(connectionInstance);
-                //     setSelectedFibers([]); // Clear any pending fiber selections
-                // }
-                return; // Click handled (or intentionally ignored for CP click action)
+                return;
             }
 
-            // 2. Check Connection Tubes
             const connectionTubeMeshes: THREE.Mesh[] = [];
             connections.current.forEach(conn => {
-                conn.getMesh().children.forEach(child => { // Assuming getMesh() returns a Group
+                conn.getMesh().children.forEach(child => {
                     if (child instanceof THREE.Mesh) {
                         connectionTubeMeshes.push(child);
                     }
@@ -609,146 +527,105 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
                 const intersectedTube = connectionIntersects[0].object;
                 if (intersectedTube.parent && intersectedTube.parent.userData.isConnection) {
                     const clickedConnection = intersectedTube.parent.userData.connectionInstance as FiberConnection;
-                    // console.log("[OpticalCable] Clicked on a connection tube.", clickedConnection);
                     if (editingConnection === clickedConnection) {
-                        // Optional: Clicking an already selected connection could deselect it
-                        // setEditingConnection(null);
-                        // clearControlPointHelpers();
+                        // Optional: Deselect
                     } else {
                         setEditingConnection(clickedConnection);
                         showControlPointHelpers(clickedConnection);
-                        setSelectedFibers([]); // Clear any pending fiber selections
+                        setSelectedFibers([]);
                     }
-                    return; // Click handled
+                    return;
                 }
             }
 
-            // 3. Check Cable Groups (this will include fibers and cable sheaths)
-            // The raycaster sorts by distance, so the first element is the closest.
             const cableAndFiberIntersects = raycaster.intersectObjects([...allCableGroups, ...allSplitterGroups], true);
-
             if (cableAndFiberIntersects.length > 0) {
                 const firstHitObject = cableAndFiberIntersects[0].object;
-
                 if (firstHitObject.userData.isFiber) {
-                    // console.log("[OpticalCable] Clicked on a Fiber.");
                     const clickedFiber = firstHitObject as THREE.Mesh;
-
-                    // If a connection is being edited, clicking a fiber should stop that editing.
                     if (editingConnection) {
                         setEditingConnection(null);
                         clearControlPointHelpers();
                     }
-                    setSelectedFiber({ // For UI display state
+                    setSelectedFiber({
                         index: clickedFiber.userData.fiberIndex,
                         cableType: clickedFiber.userData.cableType
                     });
 
-                    // Fiber selection logic for creating a new connection:
                     const originalMaterial = originalMaterials.get(clickedFiber) || clickedFiber.material;
                     if (selectedFibers.length === 0) {
                         setSelectedFibers([clickedFiber]);
-                        // Visual feedback for first selection
                         (clickedFiber as THREE.Mesh).material = new THREE.MeshPhongMaterial({ color: 0xffff00, emissive: 0x555500 });
                     } else if (selectedFibers.length === 1 && selectedFibers[0] !== clickedFiber) {
-                        // Second fiber selection - create connection
                         const fiber1 = selectedFibers[0];
                         const fiber2 = clickedFiber;
-
-                        // Revert first fiber's material
                         const firstFiberOriginalMaterial = originalMaterials.get(fiber1) || fiber1.material;
                         (fiber1 as THREE.Mesh).material = firstFiberOriginalMaterial;
 
                         const newConnection = new FiberConnection(fiber1, fiber2, connectionManager, undefined);
                         scene.add(newConnection.getMesh());
                         connections.current = [...connections.current, newConnection];
-                        setSelectedFibers([]); // Reset for next connection
+                        setSelectedFibers([]);
                     } else if (selectedFibers.length === 1 && selectedFibers[0] === clickedFiber) {
-                        // Clicked the same fiber again - deselect
                         (clickedFiber as THREE.Mesh).material = originalMaterial;
                         setSelectedFibers([]);
                     }
-                    return; // Fiber click handled
+                    return;
                 } else {
-                    // Clicked on a part of a cable group that is NOT a fiber (e.g., the cable sheath)
-                    // console.log("[OpticalCable] Clicked on a Cable Sheath/Part:", firstHitObject);
-
-                    // Action: Deselect any active connection or pending fiber selections.
                     if (editingConnection) {
                         setEditingConnection(null);
                         clearControlPointHelpers();
                     }
                     if (selectedFibers.length > 0) {
                         const firstFiberOriginalMaterial = originalMaterials.get(selectedFibers[0]) || selectedFibers[0].material;
-                        (selectedFibers[0] as THREE.Mesh).material = firstFiberOriginalMaterial; // Revert material
+                        (selectedFibers[0] as THREE.Mesh).material = firstFiberOriginalMaterial;
                         setSelectedFibers([]);
                     }
-                    setSelectedFiber(null); // Clear single fiber display
-                    // You might want to select the cable itself here if you have such a feature.
-                    return; // Cable sheath click handled, preventing click-through to underlying fibers.
+                    setSelectedFiber(null);
+                    return;
                 }
             }
 
-            // 4. If nothing interactive was hit (empty space click)
-            // console.log("[OpticalCable] Clicked on empty space.");
             if (editingConnection) {
                 setEditingConnection(null);
                 clearControlPointHelpers();
             }
             if (selectedFibers.length > 0) {
-                // Revert material of the first selected fiber if clicking away
                 const firstFiberOriginalMaterial = originalMaterials.get(selectedFibers[0]) || selectedFibers[0].material;
                 (selectedFibers[0] as THREE.Mesh).material = firstFiberOriginalMaterial;
                 setSelectedFibers([]);
             }
-            setSelectedFiber(null); // Clear UI display
+            setSelectedFiber(null);
         };
 
-        // ... (event listener setup and cleanup in useEffect) ...
-        // Make sure 'window' is used for mouseup to catch drags outside the canvas
         currentMountRef.addEventListener('mousedown', handleMouseDown);
         currentMountRef.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp); // IMPORTANT: use window
+        window.addEventListener('mouseup', handleMouseUp);
         currentMountRef.addEventListener('click', handleClick);
 
         return () => {
             currentMountRef.removeEventListener('mousedown', handleMouseDown);
             currentMountRef.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp); // IMPORTANT: use window
+            window.removeEventListener('mouseup', handleMouseUp);
             currentMountRef.removeEventListener('click', handleClick);
-            // clearControlPointHelpers();
         };
 
-    }, [camera, allCableGroups, allSplitterGroups, allConnectables, editingConnection, selectedFibers, originalMaterials, controls, raycaster, mouse]); // ADD allSplitterGroups and allConnectables here
+    }, [camera, allCableGroups, allSplitterGroups, allConnectables, editingConnection, selectedFibers, originalMaterials, controls, raycaster, mouse]);
 
-    // expanded
-
-    // useEffect for Three.js setup (renderer, camera, lights, etc.)
-    // ... (keep your existing setup useEffect largely as is)
-    // Make sure its dependency array is correct.
-    // The dependency for adding objects to scene is allCableGroups. Connections are added dynamically.
+    // ... (rest of your component, including the other useEffect hooks and the return statement)
     useEffect(() => {
-        // ... (your existing setup code for renderer, camera, initial objects) ...
-        // Ensure initial connections are also added if they exist from a saved state (not current)
+        // ... (your existing setup useEffect remains the same)
         connections.current.forEach(conn => scene.add(conn.getMesh()));
 
-
-        // Cleanup for this effect
         return () => {
-            // ... (your existing cleanup: remove resize listener, dispose controls, renderer)
-            // Remove all dynamically added objects that are not part of allCableGroups
             connections.current.forEach(conn => scene.remove(conn.getMesh()));
-            clearControlPointHelpers(); // Also clear helpers here
-            // The allCableGroups are removed as per your existing code
+            clearControlPointHelpers();
         };
-    }, [allCables, allFibers, allCableGroups]); // Keep existing dependencies, or refine
-
-
+    }, [allCables, allFibers, allCableGroups]);
 
     useEffect(() => {
         if (!mountRef.current) return;
         isMounted.current = true
-        // Initialize renderer
         renderer.current = new THREE.WebGLRenderer({ antialias: true });
         const rendererInstance = renderer.current;
         const width = mountRef.current.clientWidth;
@@ -758,39 +635,30 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
         rendererInstance.setClearColor(0xf0f0f0);
         mountRef.current.appendChild(rendererInstance.domElement);
 
-        // Camera setup
         camera.aspect = width / height;
         camera.position.set(0.28, 4.36, 2.55);
         camera.lookAt(0, 0, 0);
         camera.updateProjectionMatrix();
 
-        // Controls setup
         controls.current = new OrbitControls(camera, rendererInstance.domElement);
         controls.current.enableDamping = true;
         controls.current.dampingFactor = 0.1;
-
         controls.current.addEventListener('change', () => {
             const pos = camera.position;
             setCameraPosition(`(${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`);
         });
 
-        // Lighting
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         scene.add(ambientLight);
-
         const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
         directionalLight.position.set(10, 10, 10);
         scene.add(directionalLight);
 
-        // Add cables to scene
         allCableGroups.forEach(cable => scene.add(cable));
         allSplitterGroups.forEach(splitter => scene.add(splitter))
-        // Add coordinate axes helper
-        // Create AxesHelper
         const axesHelper = new THREE.AxesHelper(5);
         scene.add(axesHelper);
 
-        // Function to create a TextSprite
         const createTextSprite = (text: string, color: string): THREE.Sprite => {
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d')!;
@@ -801,36 +669,31 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
             context.textAlign = 'center';
             context.textBaseline = 'middle';
             context.fillText(text, 64, 64);
-
             const texture = new THREE.CanvasTexture(canvas);
             const material = new THREE.SpriteMaterial({ map: texture });
             const sprite = new THREE.Sprite(material);
-            sprite.scale.set(0.5, 0.5, 0.5); // Adjust size of the label
+            sprite.scale.set(0.5, 0.5, 0.5);
             return sprite;
         };
 
-        // Add axis labels
         const xLabel = createTextSprite('X', 'red');
-        xLabel.position.set(5.5, 0, 0); // Slightly beyond the X axis end
+        xLabel.position.set(5.5, 0, 0);
         scene.add(xLabel);
-
         const yLabel = createTextSprite('Y', 'green');
-        yLabel.position.set(0, 5.5, 0); // Slightly beyond the Y axis end
+        yLabel.position.set(0, 5.5, 0);
         scene.add(yLabel);
-
         const zLabel = createTextSprite('Z', 'blue');
-        zLabel.position.set(0, 0, 5.5); // Slightly beyond the Z axis end
+        zLabel.position.set(0, 0, 5.5);
         scene.add(zLabel);
 
-        // Animation loop
         const animate = () => {
+            if (!isMounted.current) return;
             requestAnimationFrame(animate);
             controls.current?.update();
             rendererInstance.render(scene, camera);
         };
         animate();
 
-        // Handle resize
         const handleResize = () => {
             if (!mountRef.current) return;
             const width = mountRef.current.clientWidth;
@@ -841,17 +704,18 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
         };
         window.addEventListener('resize', handleResize);
 
-        // Cleanup
         return () => {
+            isMounted.current = false;
             window.removeEventListener('resize', handleResize);
-            controls.current?.removeEventListener('change', () => { });
             controls.current?.dispose();
             allCableGroups.forEach(cable => scene.remove(cable));
             allSplitterGroups.forEach(splitter => scene.remove(splitter));
-            mountRef.current?.removeChild(rendererInstance.domElement);
+            if (mountRef.current && rendererInstance.domElement) {
+                mountRef.current.removeChild(rendererInstance.domElement);
+            }
             rendererInstance.dispose();
         };
-    }, [allCableGroups, allFibers, allSplitterGroups]);
+    }, [allCableGroups, allFibers, allSplitterGroups]); // Keep dependencies as they were
 
     return (
         <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
@@ -871,31 +735,25 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
                     <div style={{ marginTop: '8px' }}>
                         Selected Fiber: {selectedFiber.index} |
                         Cable: {selectedFiber.cableType} |
-                        {/* Color: {fibers[selectedFiber.index].color} */}
                     </div>
                 )}
-
             </div>
-            {editingConnection && ( // Only show if a connection is being "edited" (helpers are visible)
+            {editingConnection && (
                 <button
                     onClick={handleDeleteConnection}
                     style={{
                         position: 'absolute',
-                        bottom: '20px', // Adjust as needed for spacing from other UI
-                        left: '300px', // Example: to the right of the info box, adjust width (200px) as needed
-                        // If you want it truly bottom-left most, use left: '20px' and adjust bottom relative to other elements
-                        // For now, placing it to the right of the existing info box:
-                        // left: '20px', // if you want it stacked or need to adjust other UI
-                        // bottom: '60px', // if stacking above info box
+                        bottom: '20px',
+                        left: '300px',
                         padding: '8px 15px',
-                        backgroundColor: 'rgba(220, 53, 69, 0.8)', // Bootstrap danger red, with some transparency
+                        backgroundColor: 'rgba(220, 53, 69, 0.8)',
                         color: 'white',
                         border: 'none',
                         borderRadius: '5px',
                         cursor: 'pointer',
                         fontSize: '14px',
                         boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-                        zIndex: 10 // Ensure it's above the canvas
+                        zIndex: 10
                     }}
                 >
                     Delete Connection
@@ -904,8 +762,7 @@ const OpticalCable: React.FC<OpticalCableProps> = ({ cables, objectsOnCanvas: sp
         </div>
     );
 };
-
-
+// The wrapper component OpticalCableVisualizer remains unchanged
 const OpticalCableVisualizer: React.FC<{ cables: ICable[], objectsOnCanvas: ISplitter[] }> = ({ cables, objectsOnCanvas }) => {
 
     return (

@@ -20,8 +20,14 @@ export interface IUser {
 }
 
 export type Splitter = {
-        name: string;
-        id: string;
-        inputs: { id: string; parentId: string; color?: string }[];
-        outputs: { id: string; parentId: string; color?: string }[];
-    }
+    name: string;
+    id: string;
+    inputs: { id: string; parentId: string; color?: string }[];
+    outputs: { id: string; parentId: string; color?: string }[];
+}
+
+export interface MapPoint {
+    id: string | number; // Unique ID for React key
+    lat: number;
+    lng: number;
+}
