@@ -2,6 +2,7 @@
 import React from 'react';
 import { GoogleMap, LoadScript, MarkerF, Polyline, OverlayView } from '@react-google-maps/api';
 import { MapPoint } from 'src/utils/types';
+import { SpecialMode } from './InteractiveMap';
 
 const googleMapOptions = { disableDefaultUI: true, gestureHandling: 'cooperative' };
 const googleMarkerIcon = { url: `data:image/svg+xml;charset=UTF-8,...` /* same as before */ };
@@ -10,14 +11,16 @@ interface Props {
   points: MapPoint[];
   measurePoints: MapPoint[];
   mousePosition: MapPoint | null;
-  isMeasureMode: boolean;
+  specialMode: SpecialMode;
   onMapClick: (e: google.maps.MapMouseEvent) => void;
   onMouseMove: (e: google.maps.MapMouseEvent) => void;
   segments: { p1: MapPoint, p2: MapPoint, distance: number }[];
 }
 
-const GoogleMapRenderer: React.FC<Props> = ({ points, measurePoints, mousePosition, isMeasureMode, onMapClick, onMouseMove, segments }) => {
+const GoogleMapRenderer: React.FC<Props> = ({ points, measurePoints, mousePosition, specialMode, onMapClick, onMouseMove, segments }) => {
   const mapRef = React.useRef<google.maps.Map | null>(null);
+
+  const isMeasureMode = specialMode === 'ruler';
 
   React.useEffect(() => {
     if (mapRef.current) {

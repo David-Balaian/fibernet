@@ -2,11 +2,12 @@ import { MapContainer, TileLayer, Marker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MapPoint } from 'src/utils/types';
+import { SpecialMode } from './InteractiveMap';
 interface Props {
     points: MapPoint[];
     measurePoints: MapPoint[];
     mousePosition: MapPoint | null;
-    isMeasureMode: boolean;
+    specialMode: SpecialMode;
     onMapClick: (e: google.maps.MapMouseEvent) => void;
     onMouseMove: (e: google.maps.MapMouseEvent) => void;
     segments: { p1: MapPoint, p2: MapPoint, distance: number }[];
@@ -27,7 +28,7 @@ function LeafletMapRenderer({
     points,
     measurePoints,
     mousePosition,
-    isMeasureMode,
+    specialMode,
     onMapClick,
     onMouseMove,
     segments,

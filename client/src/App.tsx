@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Header from './components/Templates/Header/Header'
 import { useAppDispatch, useAppSelector } from './store/storeHooks'
 import { getAccount, getAuthStatus } from './store/user/selectors'
@@ -11,6 +11,7 @@ import { MapPoint } from './utils/types'
 export default function App() {
   const dispatch = useAppDispatch()
   const isLoggedIn = useAppSelector(getAuthStatus) 
+  const [mode, setMode] = useState<"map" | "cable">("map")
 
   useEffect(()=>{
     const accountLS = getUserFromLS()
@@ -28,11 +29,10 @@ export default function App() {
 
   return (
     <div className='App'>
-      {/* <Header /> */}
+      <Header setMode={setMode} />
 
       {/* {isLoggedIn ? <LoggedInText /> : <LoggedOutText />} */}
-      {/* <OpticalCableVisualizer /> */}
-      <InteractiveMap points={markers} />
+      {mode === "cable" ? <OpticalCableVisualizer /> : <InteractiveMap points={markers} />}
     </div>
   )
 }

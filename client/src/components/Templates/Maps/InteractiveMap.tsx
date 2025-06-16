@@ -16,7 +16,7 @@ import InputLabel from '@mui/material/InputLabel';
 import IconButton from '@mui/material/IconButton';
 import Paper from '@mui/material/Paper';
 import StraightenIcon from '@mui/icons-material/Straighten';
-import { Typography } from '@mui/material';
+import { Button, Typography } from '@mui/material';
 
 // --- Configuration ---
 type MapProvider = 'google' | 'yandex' | 'leaflet';
@@ -43,20 +43,24 @@ interface InteractiveMapProps {
     points?: MapPoint[];
 }
 
+export type SpecialMode = 'ruler' | 'pillar' | null;
+
 const InteractiveMap: React.FC<InteractiveMapProps> = ({ points = [] }) => {
     const [provider, setProvider] = useState<MapProvider>('yandex');
     const [mapType, setMapType] = useState<string>(mapTypesByProvider.yandex[0].value);
-    
+
     // --- State for Measurement UI ---
-    const [isMeasureMode, setIsMeasureMode] = useState(false);
+    const [specialMode, setSpecialMode] = useState<SpecialMode>(null);
     const [totalDistance, setTotalDistance] = useState(0);
+
+
 
     const handleProviderChange = (event: SelectChangeEvent) => {
         const newProvider = event.target.value as MapProvider;
         setProvider(newProvider);
         setMapType(mapTypesByProvider[newProvider][0].value);
         // Reset measurement when provider changes
-        setIsMeasureMode(false);
+        setSpecialMode(null);
         setTotalDistance(0);
     };
 
@@ -64,9 +68,13 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ points = [] }) => {
         setMapType(event.target.value);
     }
 
+    const handlePillarClick = () => {
+        setSpecialMode(prev=>prev === "pillar" ? null : "pillar");
+    };
+
     const handleRulerClick = () => {
-        const newMode = !isMeasureMode;
-        setIsMeasureMode(newMode);
+        const newMode = specialMode !== 'ruler';
+        setSpecialMode(prev=>prev === "ruler" ? null : "ruler");
         if (!newMode) { // If turning off measurement, reset distance
             setTotalDistance(0);
         }
@@ -80,28 +88,28 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ points = [] }) => {
     const renderMap = () => {
         const commonProps = {
             points,
-            isMeasureMode,
+            specialMode,
             mapType,
             onDistanceChange: handleDistanceChange,
         };
-        
+
         // These props are not needed for Yandex anymore, but might be for others
         // If you refactor Google/Leaflet in the same way, you can remove them.
         const legacyMeasureProps = {
-             measurePoints: [],
-             mousePosition: null,
-             segments: [],
-             onMapClick: () => {},
-             onMouseMove: () => {},
+            measurePoints: [],
+            mousePosition: null,
+            segments: [],
+            onMapClick: () => { },
+            onMouseMove: () => { },
         };
 
         switch (provider) {
             case 'google':
                 return <GoogleMapRenderer {...commonProps} {...legacyMeasureProps} />;
             case 'yandex':
-                return <YandexMapWrapper 
-                    {...commonProps} 
-                    center={[mapCenter.lat, mapCenter.lng]} 
+                return <YandexMapWrapper
+                    {...commonProps}
+                    center={[mapCenter.lat, mapCenter.lng]}
                     apiKey={import.meta.env.VITE_APP_YANDEX_MAPS_API_KEY}
                 />;
             case 'leaflet':
@@ -119,14 +127,17 @@ const InteractiveMap: React.FC<InteractiveMapProps> = ({ points = [] }) => {
             overflow: 'hidden',
         }}>
             <Paper elevation={4} sx={{ position: 'absolute', top: 15, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, p: 1, display: 'flex', alignItems: 'center', gap: 2 }}>
-                <IconButton onClick={handleRulerClick} color={isMeasureMode ? 'error' : 'primary'}>
+                <IconButton onClick={handleRulerClick} color={specialMode === 'ruler' ? 'error' : 'primary'}>
                     <StraightenIcon />
                 </IconButton>
-                {isMeasureMode && totalDistance > 0 && (
+                {specialMode === 'ruler' && totalDistance > 0 && (
                     <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
                         {totalDistance < 1000 ? `${totalDistance.toFixed(0)} m` : `${(totalDistance / 1000).toFixed(2)} km`}
                     </Typography>
                 )}
+                <Button onClick={handlePillarClick} variant='contained' size='small' sx={{ fontSize: 10 }} color={specialMode === 'pillar' ? 'error' : 'primary'}>
+                    Pillar
+                </Button>
             </Paper>
 
             <Paper

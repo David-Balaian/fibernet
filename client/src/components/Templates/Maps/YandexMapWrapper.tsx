@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MapPoint } from 'src/utils/types'; // Assumes this type definition exists
 import { calculateDistance } from 'src/utils/MapsHelpers/distance'; // Assumes this helper exists
+import { SpecialMode } from './InteractiveMap';
 
 // Props interface for the component
 interface YandexMapProps {
@@ -9,7 +10,7 @@ interface YandexMapProps {
   zoom?: number;
   mapType: string;
   points: MapPoint[]; // Default points to display
-  isMeasureMode: boolean;
+  specialMode: SpecialMode;
   onDistanceChange: (distance: number) => void; // Callback to update parent with total distance
 }
 
@@ -29,7 +30,7 @@ const YandexMapWrapper: React.FC<YandexMapProps> = ({
   zoom = 16,
   mapType,
   points,
-  isMeasureMode,
+  specialMode,
   onDistanceChange,
 }) => {
   // --- Refs for Map and API Objects ---
@@ -37,6 +38,7 @@ const YandexMapWrapper: React.FC<YandexMapProps> = ({
   const mapInstance = useRef<any>(null);
   const defaultPlacemarks = useRef<any>(null);
   const measureObjects = useRef<any>(null);
+  const isMounted = useRef<any>(null);
 
   // --- Refs for Live Ruler Objects (for smooth updates) ---
   const liveRulerLine = useRef<any>(null);
@@ -47,23 +49,53 @@ const YandexMapWrapper: React.FC<YandexMapProps> = ({
   const [measurePoints, setMeasurePoints] = useState<MapPoint[]>([]);
   const [mousePosition, setMousePosition] = useState<MapPoint | null>(null);
 
+  const isMeasureMode = specialMode === 'ruler'
+  const isPillarMode = specialMode === 'pillar';
   // --- Event Handlers for Measurement ---
   const handleMapClick = (e: any) => {
+    console.log(e);
+
     const coords = e.get('coords');
     const newPoint: MapPoint = {
       id: Date.now(),
-      lat: coords[0] - 0.00005,
-      lng: coords[1] - 0.00005,
+      lat: coords[0],
+      lng: coords[1],
     };
-    setMeasurePoints(prev => [...prev, newPoint]);
+    switch (specialMode) {
+      case 'ruler':
+        setMeasurePoints(prev => [...prev, newPoint]);
+        break;
+      case 'pillar':
+        console.log("Adding pillar at:", newPoint);
+        
+        const placemarkLayout = window.ymaps.templateLayoutFactory.createClass('<div class="pillar-placemark"></div>');
+        const placemark = new window.ymaps.Placemark([newPoint.lat, newPoint.lng], {}, {
+          iconLayout: placemarkLayout,
+          iconShape: { type: 'Circle', coordinates: [0, 0], radius: 11 }
+        });
+        console.log(defaultPlacemarks.current);
+        
+        defaultPlacemarks.current.add(placemark);
+        break;
+
+      default:
+        break;
+    }
   };
+
+  const handleMapRightClick = (e: any) => {
+    e.stopPropagation()
+    console.log("Double click detected, clearing measurement points.");
+    setMousePosition(null)
+    mapInstance.current.events.remove('mousemove', handleMouseMove);
+  }
 
   const handleMouseMove = (e: any) => {
     const coords = e.get('coords');
     setMousePosition({
       id: 'mouse',
-      lat: coords[0] - 0.00005,
-      lng: coords[1] - 0.00005,
+      lat: coords[0],
+      lng: coords[1],
     });
   };
 
@@ -114,7 +146,8 @@ const YandexMapWrapper: React.FC<YandexMapProps> = ({
   }, [isScriptLoaded]);
 
   useEffect(() => {
-    if (mapInstance.current) {
+    if (mapInstance.current && !isMounted.current) {
+      isMounted.current = true
       mapInstance.current.setType(mapType);
       mapInstance.current.setCenter(center, zoom);
     }
@@ -123,9 +156,10 @@ const YandexMapWrapper: React.FC<YandexMapProps> = ({
   // --- Measurement Mode Effects ---
   useEffect(() => {
     if (mapInstance.current && isScriptLoaded) {
-      if (isMeasureMode) {
+      if (specialMode) {
         mapInstance.current.options.set('cursor', 'crosshair');
         mapInstance.current.events.add('click', handleMapClick);
+        mapInstance.current.events.add('contextmenu', handleMapRightClick);
         mapInstance.current.events.add('mousemove', handleMouseMove);
       } else {
         mapInstance.current.options.set('cursor', 'grab');
@@ -139,7 +173,7 @@ const YandexMapWrapper: React.FC<YandexMapProps> = ({
         mapInstance.current.events.remove('mousemove', handleMouseMove);
       }
     };
-  }, [isMeasureMode, isScriptLoaded]);
+  }, [specialMode, isScriptLoaded]);
 
 
   // --- Drawing Effects (Optimized) ---
@@ -234,7 +268,7 @@ const YandexMapWrapper: React.FC<YandexMapProps> = ({
   useEffect(() => {
     if (mapInstance.current && defaultPlacemarks.current) {
       defaultPlacemarks.current.removeAll();
-      const placemarkLayout = window.ymaps.templateLayoutFactory.createClass('<div class="yandex-placemark-default"></div>');
+      const placemarkLayout = window.ymaps.templateLayoutFactory.createClass('<div class="pillar-placemark"></div>');
       points.forEach(point => {
         const placemark = new window.ymaps.Placemark([point.lat, point.lng], {}, {
           iconLayout: placemarkLayout,

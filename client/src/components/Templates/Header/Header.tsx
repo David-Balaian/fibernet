@@ -1,4 +1,4 @@
-import {Fragment, MouseEvent, useState} from 'react'
+import { Fragment, MouseEvent, useState } from 'react'
 import {
   AppBar,
   IconButton,
@@ -14,7 +14,7 @@ import { useAppDispatch, useAppSelector } from 'src/store/storeHooks'
 import { getAccount, getAuthStatus } from 'src/store/user/selectors'
 import userSlice from 'src/store/user/slice'
 
-export default function Header() {
+export default function Header({setMode}: {setMode: (mode: "map" | "cable") => void}) {
   const dispatch = useAppDispatch()
   const isLoggedIn = useAppSelector(getAuthStatus)
   const account = useAppSelector(getAccount)
@@ -51,7 +51,15 @@ export default function Header() {
 
   return (
     <AppBar className='header' position='static'>
-      <h1>Web App</h1>
+      <div>
+        <button onClick={()=>setMode("map")}>
+          map
+        </button>
+        <button onClick={()=>setMode("cable")}>
+          cable
+        </button>
+      </div>
+
 
       <IconButton onClick={openPopover}>
         <OnlineIndicator online={isLoggedIn}>
@@ -63,10 +71,10 @@ export default function Header() {
         anchorEl={anchorEl}
         open={popover}
         onClose={closePopover}
-        anchorOrigin={{vertical: 'bottom', horizontal: 'right'}}
-        transformOrigin={{vertical: 'top', horizontal: 'right'}}>
-        <List style={{minWidth: '100px'}}>
-          <ListSubheader style={{textAlign: 'center'}}>
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
+        <List style={{ minWidth: '100px' }}>
+          <ListSubheader style={{ textAlign: 'center' }}>
             Hello, {isLoggedIn ? `${account?.firstName} ${account?.lastName}` : 'Guest'}
           </ListSubheader>
 
