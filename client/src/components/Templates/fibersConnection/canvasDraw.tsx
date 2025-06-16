@@ -1237,7 +1237,7 @@ const OpticalFiberCanvas: React.FC<OpticalCanvasProps> = ({
             }
             return arr
         }
-        const offsets = generateOffset(50)
+        const offsets = generateOffset(100)
         for (const offset of offsets) {
             addCandidate([{ x: p1.x, y: p1.y }, { x: centralX + offset, y: p1.y }, { x: centralX + offset, y: p2.y }, { x: p2.x, y: p2.y }]);
             addCandidate([{ x: p1.x, y: p1.y }, { x: p1.x, y: centralY + offset }, { x: p2.x, y: centralY + offset }, { x: p2.x, y: p2.y }]);

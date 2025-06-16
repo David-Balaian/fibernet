@@ -7,6 +7,9 @@ const router = createBrowserRouter([
       element: <App />,
       children: [],
     },
+    {
+      basename: "/usernet",
+    }
   ]);
   
   export default router
